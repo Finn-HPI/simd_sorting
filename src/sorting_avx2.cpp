@@ -46,6 +46,48 @@ simd_sort4x64(int64_t *data, int64_t *output) {
 }
 
 inline void __attribute((always_inline))
+avx512_transpose_8x8(__m512i &row_0, __m512i &row_1, __m512i &row_2,
+                     __m512i &row_3, __m512i &row_4, __m512i &row_5,
+                     __m512i &row_6, __m512i &row_7) {
+  __m512i t0 = _mm512_unpacklo_epi64(row_0, row_1);
+  __m512i t1 = _mm512_unpackhi_epi64(row_0, row_1);
+  __m512i t2 = _mm512_unpacklo_epi64(row_2, row_3);
+  __m512i t3 = _mm512_unpackhi_epi64(row_2, row_3);
+  __m512i t4 = _mm512_unpacklo_epi64(row_4, row_5);
+  __m512i t5 = _mm512_unpackhi_epi64(row_4, row_5);
+  __m512i t6 = _mm512_unpacklo_epi64(row_6, row_7);
+  __m512i t7 = _mm512_unpackhi_epi64(row_6, row_7);
+
+  __m512i tt0 = _mm512_shuffle_i64x2(t0, t2, 0x44);
+  __m512i tt1 = _mm512_shuffle_i64x2(t0, t2, 0xEE);
+  __m512i tt2 = _mm512_shuffle_i64x2(t1, t3, 0x44);
+  __m512i tt3 = _mm512_shuffle_i64x2(t1, t3, 0xEE);
+  __m512i tt4 = _mm512_shuffle_i64x2(t4, t6, 0x44);
+  __m512i tt5 = _mm512_shuffle_i64x2(t4, t6, 0xEE);
+  __m512i tt6 = _mm512_shuffle_i64x2(t5, t7, 0x44);
+  __m512i tt7 = _mm512_shuffle_i64x2(t5, t7, 0xEE);
+
+  const auto indices_one = _mm512_set_epi64(13, 12, 9, 8, 5, 4, 1, 0);
+  const auto indices_two = _mm512_set_epi64(15,14,11,10, 7,6,3,2);
+  row_0 = _mm512_permutex2var_epi64(
+      tt0, indices_one, tt4);
+  row_1 = _mm512_permutex2var_epi64(
+      tt2, indices_one, tt6);
+  row_2 = _mm512_permutex2var_epi64(
+      tt0, indices_two, tt4);
+  row_3 = _mm512_permutex2var_epi64(
+      tt2, indices_two, tt6); 
+  row_4 = _mm512_permutex2var_epi64(
+      tt1, indices_one, tt5);
+  row_5 = _mm512_permutex2var_epi64(
+      tt3, indices_one, tt7);
+  row_6 =  _mm512_permutex2var_epi64(
+      tt1, indices_two, tt5);
+  row_7 = _mm512_permutex2var_epi64(
+      tt3, indices_two, tt7);
+}
+
+inline void __attribute((always_inline))
 simd_sort8x64(int64_t *data, int64_t *output) {
   auto row_a = _mm512_load_epi64(data);
   auto row_b = _mm512_load_epi64(data + 8);
@@ -99,28 +141,39 @@ simd_sort8x64(int64_t *data, int64_t *output) {
   auto row_e7 = _mm512_max_epi64(row_d6, row_e6);
   auto row_f6 = _mm512_min_epi64(row_f5, row_g5);
   auto row_g6 = _mm512_max_epi64(row_f5, row_g5);
+
+  avx512_transpose_8x8(row_a4, row_b6, row_c6, row_d7, row_e7, row_f5, row_g6, row_h4); 
+
+  _mm512_store_epi64(output, row_a4);
+  _mm512_store_epi64(output + 8, row_b6);
+  _mm512_store_epi64(output + 16, row_c6);
+  _mm512_store_epi64(output + 24, row_d7);
+  _mm512_store_epi64(output + 32, row_e7);
+  _mm512_store_epi64(output + 40, row_f5);
+  _mm512_store_epi64(output + 48, row_g6);
+  _mm512_store_epi64(output + 56, row_h4);
+
 }
 
 int main() {
   // clang-format off
-  alignas(32) auto input =
+  alignas(64) auto input =
       std::array<int64_t, 64>{
-      8,8,8,8,8,8,8,8,
-      7,7,7,7,7,7,7,7,
-      6,6,6,6,6,6,6,6,
-      5,5,5,5,5,5,5,5,
-      4,4,4,4,4,4,4,4,
-      3,3,3,3,3,3,3,3,
-      2,2,2,2,2,2,2,2,
-      1,1,1,1,1,1,1,1
+1,2,3,4,5,6,7,8,
+9,10,11,12,13,14,15,16,
+17,18,19,20,21,22,23,24,
+25,26,27,28,29,30,31,32,
+33,34,35,36,37,38,39,40,
+41,42,43,44,45,46,47,48,
+49,50,51,52,53,54,55,56,
+57,58,59,60,61,62,63,64
     };
   // clang-format on
-  alignas(32) auto output = std::array<int64_t, 16>{};
-  simd_sort4x64(input.data(), output.data());
-  for (int i = 0; i < 4; ++i) {
-    std::cout << "list " << i << ": ";
-    for (int j = 0; j < 4; ++j) {
-      std::cout << output[i * 4 + j] << " ";
+  alignas(64) auto output = std::array<int64_t, 64>{};
+  simd_sort8x64(input.data(), output.data());
+  for (int i = 0; i < 8; ++i) {
+    for (int j = 0; j < 8; ++j) {
+      std::cout << output[i * 8 + j] << " ";
     }
     std::cout << std::endl;
   }
