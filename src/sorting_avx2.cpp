@@ -1,6 +1,9 @@
 #include <array>
+#include <chrono>
+#include <cstdint>
 #include <immintrin.h>
 #include <iostream>
+#include <random>
 
 constexpr auto CHOOSE_BOTH_LOWER_HALVES = 0x20;
 constexpr auto CHOOSE_BOTH_UPPER_HALVES = 0x31;
@@ -19,7 +22,7 @@ avx2_transpose_4x4(__m256d &row_0, __m256d &row_1, __m256d &row_2,
 }
 
 inline void __attribute((always_inline))
-simd_sort4x64(int64_t *data, int64_t *output) {
+simd_sort4x64(int64_t *__restrict data, int64_t *__restrict output) {
   auto row_0 = _mm256_load_pd(reinterpret_cast<double const *>(data));
   auto row_1 = _mm256_load_pd(reinterpret_cast<double const *>(data + 4));
   auto row_2 = _mm256_load_pd(reinterpret_cast<double const *>(data + 8));
@@ -68,27 +71,19 @@ avx512_transpose_8x8(__m512i &row_0, __m512i &row_1, __m512i &row_2,
   __m512i tt7 = _mm512_shuffle_i64x2(t5, t7, 0xEE);
 
   const auto indices_one = _mm512_set_epi64(13, 12, 9, 8, 5, 4, 1, 0);
-  const auto indices_two = _mm512_set_epi64(15,14,11,10, 7,6,3,2);
-  row_0 = _mm512_permutex2var_epi64(
-      tt0, indices_one, tt4);
-  row_1 = _mm512_permutex2var_epi64(
-      tt2, indices_one, tt6);
-  row_2 = _mm512_permutex2var_epi64(
-      tt0, indices_two, tt4);
-  row_3 = _mm512_permutex2var_epi64(
-      tt2, indices_two, tt6); 
-  row_4 = _mm512_permutex2var_epi64(
-      tt1, indices_one, tt5);
-  row_5 = _mm512_permutex2var_epi64(
-      tt3, indices_one, tt7);
-  row_6 =  _mm512_permutex2var_epi64(
-      tt1, indices_two, tt5);
-  row_7 = _mm512_permutex2var_epi64(
-      tt3, indices_two, tt7);
+  const auto indices_two = _mm512_set_epi64(15, 14, 11, 10, 7, 6, 3, 2);
+  row_0 = _mm512_permutex2var_epi64(tt0, indices_one, tt4);
+  row_1 = _mm512_permutex2var_epi64(tt2, indices_one, tt6);
+  row_2 = _mm512_permutex2var_epi64(tt0, indices_two, tt4);
+  row_3 = _mm512_permutex2var_epi64(tt2, indices_two, tt6);
+  row_4 = _mm512_permutex2var_epi64(tt1, indices_one, tt5);
+  row_5 = _mm512_permutex2var_epi64(tt3, indices_one, tt7);
+  row_6 = _mm512_permutex2var_epi64(tt1, indices_two, tt5);
+  row_7 = _mm512_permutex2var_epi64(tt3, indices_two, tt7);
 }
 
 inline void __attribute((always_inline))
-simd_sort8x64(int64_t *data, int64_t *output) {
+simd_sort8x64(int64_t *__restrict data, int64_t *__restrict output) {
   auto row_a = _mm512_load_epi64(data);
   auto row_b = _mm512_load_epi64(data + 8);
   auto row_c = _mm512_load_epi64(data + 16);
@@ -142,7 +137,8 @@ simd_sort8x64(int64_t *data, int64_t *output) {
   auto row_f6 = _mm512_min_epi64(row_f5, row_g5);
   auto row_g6 = _mm512_max_epi64(row_f5, row_g5);
 
-  avx512_transpose_8x8(row_a4, row_b6, row_c6, row_d7, row_e7, row_f5, row_g6, row_h4); 
+  avx512_transpose_8x8(row_a4, row_b6, row_c6, row_d7, row_e7, row_f5, row_g6,
+                       row_h4);
 
   _mm512_store_epi64(output, row_a4);
   _mm512_store_epi64(output + 8, row_b6);
@@ -152,30 +148,42 @@ simd_sort8x64(int64_t *data, int64_t *output) {
   _mm512_store_epi64(output + 40, row_f5);
   _mm512_store_epi64(output + 48, row_g6);
   _mm512_store_epi64(output + 56, row_h4);
-
 }
 
+constexpr auto DATA_SIZE = size_t{589824};
+alignas(64) auto input = std::array<int64_t, DATA_SIZE>{};
+alignas(64) auto output_avx2 = std::array<int64_t, DATA_SIZE>{};
+alignas(64) auto output_avx512 = std::array<int64_t, DATA_SIZE>{};
+
 int main() {
-  // clang-format off
-  alignas(64) auto input =
-      std::array<int64_t, 64>{
-1,2,3,4,5,6,7,8,
-9,10,11,12,13,14,15,16,
-17,18,19,20,21,22,23,24,
-25,26,27,28,29,30,31,32,
-33,34,35,36,37,38,39,40,
-41,42,43,44,45,46,47,48,
-49,50,51,52,53,54,55,56,
-57,58,59,60,61,62,63,64
-    };
-  // clang-format on
-  alignas(64) auto output = std::array<int64_t, 64>{};
-  simd_sort8x64(input.data(), output.data());
-  for (int i = 0; i < 8; ++i) {
-    for (int j = 0; j < 8; ++j) {
-      std::cout << output[i * 8 + j] << " ";
-    }
-    std::cout << std::endl;
+  using std::chrono::duration;
+  using std::chrono::duration_cast;
+  using std::chrono::high_resolution_clock;
+  using std::chrono::nanoseconds;
+
+  unsigned int seed = 12345;
+  std::mt19937 gen(seed); // mersenne_twister_engine seeded with rd()
+  std::uniform_int_distribution<int64_t> distrib(1, 1000000);
+
+  for (auto i = size_t{0}; i < DATA_SIZE; ++i) {
+    input[i] = distrib(gen);
   }
+
+  // auto start = high_resolution_clock::now();
+  // for (auto i = size_t{0}; i < DATA_SIZE; i += 64) {
+  //   simd_sort8x64(input.data() + i, output.data() + i);
+  // }
+  // auto end = high_resolution_clock::now();
+
+  auto start = high_resolution_clock::now();
+  for (auto i = size_t{0}; i < DATA_SIZE; i += 16) {
+    auto *start = input.data() + i;
+    auto *check = output_avx2.data() + i;
+    simd_sort4x64(&input[i], &output_avx2[i]);
+  }
+  auto end = high_resolution_clock::now();
+  auto ns_int = duration_cast<nanoseconds>(end - start);
+  std::cout << "took " << ns_int.count() << " ns." << std::endl;
+
   return 0;
 }
