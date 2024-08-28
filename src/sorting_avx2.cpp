@@ -1,189 +1,171 @@
 #include <array>
-#include <chrono>
 #include <cstdint>
-#include <immintrin.h>
 #include <iostream>
 #include <random>
+#include <vector>
 
-constexpr auto CHOOSE_BOTH_LOWER_HALVES = 0x20;
-constexpr auto CHOOSE_BOTH_UPPER_HALVES = 0x31;
+constexpr auto L2_CACHE_SIZE = 256 * 1024;
+constexpr auto BLOCK_SIZE = L2_CACHE_SIZE / (2 * sizeof(uint64_t));
 
-inline void __attribute((always_inline))
-avx2_transpose_4x4(__m256d &row_0, __m256d &row_1, __m256d &row_2,
-                   __m256d &row_3) {
-  const auto ab_lo = _mm256_unpacklo_pd(row_0, row_1);
-  const auto ab_hi = _mm256_unpackhi_pd(row_0, row_1);
-  const auto cd_lo = _mm256_unpacklo_pd(row_2, row_3);
-  const auto cd_hi = _mm256_unpackhi_pd(row_2, row_3);
-  row_0 = _mm256_permute2f128_pd(ab_lo, cd_lo, CHOOSE_BOTH_LOWER_HALVES);
-  row_1 = _mm256_permute2f128_pd(ab_lo, cd_lo, CHOOSE_BOTH_UPPER_HALVES);
-  row_2 = _mm256_permute2f128_pd(ab_hi, cd_hi, CHOOSE_BOTH_LOWER_HALVES);
-  row_3 = _mm256_permute2f128_pd(ab_hi, cd_hi, CHOOSE_BOTH_UPPER_HALVES);
+#define LOWER_HAVES 0, 1, 4, 5
+#define UPPER_HAVES 2, 3, 6, 7
+#define INTERLEAVE_LOWERS 0, 4, 1, 5
+#define INTERLEAVE_UPPERS 2, 6, 3, 7
+
+using tuple_t = struct {
+  uint32_t key;
+  uint32_t rid;
+};
+
+template <typename T> using Vec __attribute__((vector_size(32))) = T;
+using UnalignedVec64 __attribute__((aligned(1))) = Vec<uint64_t>;
+template <typename T> using AlignedVec __attribute__((aligned(8))) = Vec<T>;
+
+using vec64_t = Vec<uint64_t>;
+using block16 = struct alignas(16) {};
+
+template <typename T>
+inline void __attribute((always_inline)) store_vec(Vec<T> data,
+                                                   T *__restrict output) {
+  auto *out_vec = reinterpret_cast<AlignedVec<T> *>(output);
+  *out_vec = data;
 }
 
-inline void __attribute((always_inline))
-simd_sort4x64(int64_t *__restrict data, int64_t *__restrict output) {
-  auto row_0 = _mm256_load_pd(reinterpret_cast<double const *>(data));
-  auto row_1 = _mm256_load_pd(reinterpret_cast<double const *>(data + 4));
-  auto row_2 = _mm256_load_pd(reinterpret_cast<double const *>(data + 8));
-  auto row_3 = _mm256_load_pd(reinterpret_cast<double const *>(data + 12));
-
-  auto temp_a = _mm256_min_pd(row_0, row_2);   // line 1 top
-  auto temp_b = _mm256_max_pd(row_0, row_2);   // line 1 bottom
-  auto temp_c = _mm256_min_pd(row_1, row_3);   // line 2 top
-  auto temp_d = _mm256_max_pd(row_1, row_3);   // line 2 bottom
-  auto temp_e = _mm256_max_pd(temp_a, temp_c); // line 3 bottom
-  auto temp_f = _mm256_min_pd(temp_b, temp_d); // line 4 top
-
-  row_0 = _mm256_min_pd(temp_a, temp_c); // line 3 top
-  row_1 = _mm256_min_pd(temp_e, temp_f); // line 5 top
-  row_2 = _mm256_max_pd(temp_e, temp_f); // line 5 bottom
-  row_3 = _mm256_max_pd(temp_b, temp_d); // line 4 bottom;
-
-  avx2_transpose_4x4(row_0, row_1, row_2, row_3);
-
-  _mm256_store_pd(reinterpret_cast<double *>(output), row_0);
-  _mm256_store_pd(reinterpret_cast<double *>(output + 4), row_1);
-  _mm256_store_pd(reinterpret_cast<double *>(output + 8), row_2);
-  _mm256_store_pd(reinterpret_cast<double *>(output + 12), row_3);
+template <typename T> inline Vec<T> reverse4(Vec<T> vec) {
+  return __builtin_shufflevector(vec, vec, 3, 2, 1, 0);
 }
 
-inline void __attribute((always_inline))
-avx512_transpose_8x8(__m512i &row_0, __m512i &row_1, __m512i &row_2,
-                     __m512i &row_3, __m512i &row_4, __m512i &row_5,
-                     __m512i &row_6, __m512i &row_7) {
-  __m512i t0 = _mm512_unpacklo_epi64(row_0, row_1);
-  __m512i t1 = _mm512_unpackhi_epi64(row_0, row_1);
-  __m512i t2 = _mm512_unpacklo_epi64(row_2, row_3);
-  __m512i t3 = _mm512_unpackhi_epi64(row_2, row_3);
-  __m512i t4 = _mm512_unpacklo_epi64(row_4, row_5);
-  __m512i t5 = _mm512_unpackhi_epi64(row_4, row_5);
-  __m512i t6 = _mm512_unpacklo_epi64(row_6, row_7);
-  __m512i t7 = _mm512_unpackhi_epi64(row_6, row_7);
-
-  __m512i tt0 = _mm512_shuffle_i64x2(t0, t2, 0x44);
-  __m512i tt1 = _mm512_shuffle_i64x2(t0, t2, 0xEE);
-  __m512i tt2 = _mm512_shuffle_i64x2(t1, t3, 0x44);
-  __m512i tt3 = _mm512_shuffle_i64x2(t1, t3, 0xEE);
-  __m512i tt4 = _mm512_shuffle_i64x2(t4, t6, 0x44);
-  __m512i tt5 = _mm512_shuffle_i64x2(t4, t6, 0xEE);
-  __m512i tt6 = _mm512_shuffle_i64x2(t5, t7, 0x44);
-  __m512i tt7 = _mm512_shuffle_i64x2(t5, t7, 0xEE);
-
-  const auto indices_one = _mm512_set_epi64(13, 12, 9, 8, 5, 4, 1, 0);
-  const auto indices_two = _mm512_set_epi64(15, 14, 11, 10, 7, 6, 3, 2);
-  row_0 = _mm512_permutex2var_epi64(tt0, indices_one, tt4);
-  row_1 = _mm512_permutex2var_epi64(tt2, indices_one, tt6);
-  row_2 = _mm512_permutex2var_epi64(tt0, indices_two, tt4);
-  row_3 = _mm512_permutex2var_epi64(tt2, indices_two, tt6);
-  row_4 = _mm512_permutex2var_epi64(tt1, indices_one, tt5);
-  row_5 = _mm512_permutex2var_epi64(tt3, indices_one, tt7);
-  row_6 = _mm512_permutex2var_epi64(tt1, indices_two, tt5);
-  row_7 = _mm512_permutex2var_epi64(tt3, indices_two, tt7);
+template <typename T>
+inline void bitonic4(Vec<T> in1, Vec<T> in2, Vec<T> &out1, Vec<T> &out2) {
+  // NOLINTBEGIN
+  // Level 1
+  auto lo1 = __builtin_elementwise_min(in1, in2);
+  auto hi1 = __builtin_elementwise_max(in1, in2);
+  auto lo1_perm = __builtin_shufflevector(lo1, hi1, 0, 1, 4, 5);
+  auto hi1_perm = __builtin_shufflevector(lo1, hi1, 2, 3, 6, 7);
+  // Level 2
+  auto lo2 = __builtin_elementwise_min(lo1_perm, hi1_perm);
+  auto hi2 = __builtin_elementwise_max(lo1_perm, hi1_perm);
+  auto lo2_perm = __builtin_shufflevector(lo2, hi2, 0, 4, 2, 6);
+  auto hi2_perm = __builtin_shufflevector(lo2, hi2, 1, 5, 3, 7);
+  // Level 3
+  auto lo3 = __builtin_elementwise_min(lo2_perm, hi2_perm);
+  auto hi3 = __builtin_elementwise_max(lo2_perm, hi2_perm);
+  out1 = __builtin_shufflevector(lo3, hi3, 0, 4, 1, 5);
+  out2 = __builtin_shufflevector(lo3, hi3, 2, 6, 3, 7);
+  // NOLINTEND
 }
 
-inline void __attribute((always_inline))
-simd_sort8x64(int64_t *__restrict data, int64_t *__restrict output) {
-  auto row_a = _mm512_load_epi64(data);
-  auto row_b = _mm512_load_epi64(data + 8);
-  auto row_c = _mm512_load_epi64(data + 16);
-  auto row_d = _mm512_load_epi64(data + 24);
-  auto row_e = _mm512_load_epi64(data + 32);
-  auto row_f = _mm512_load_epi64(data + 40);
-  auto row_g = _mm512_load_epi64(data + 48);
-  auto row_h = _mm512_load_epi64(data + 56);
-  /* 1. level of sorting network */
-  auto row_a2 = _mm512_min_epi64(row_a, row_c);
-  auto row_c2 = _mm512_max_epi64(row_a, row_c);
-  auto row_b2 = _mm512_min_epi64(row_b, row_d);
-  auto row_d2 = _mm512_max_epi64(row_b, row_d);
-  auto row_e2 = _mm512_min_epi64(row_e, row_g);
-  auto row_g2 = _mm512_max_epi64(row_e, row_g);
-  auto row_f2 = _mm512_min_epi64(row_f, row_h);
-  auto row_h2 = _mm512_max_epi64(row_f, row_h);
-  /* 2. level of sorting network */
-  auto row_a3 = _mm512_min_epi64(row_a2, row_e2);
-  auto row_e3 = _mm512_max_epi64(row_a2, row_e2);
-  auto row_b3 = _mm512_min_epi64(row_b2, row_f2);
-  auto row_f3 = _mm512_max_epi64(row_b2, row_f2);
-  auto row_c3 = _mm512_min_epi64(row_c2, row_g2);
-  auto row_g3 = _mm512_max_epi64(row_c2, row_g2);
-  auto row_d3 = _mm512_min_epi64(row_d2, row_h2);
-  auto row_h3 = _mm512_max_epi64(row_d2, row_h2);
-  /* 3. level of sorting network */
-  auto row_a4 = _mm512_min_epi64(row_a3, row_b3);
-  auto row_b4 = _mm512_max_epi64(row_a3, row_b3);
-  auto row_c4 = _mm512_min_epi64(row_c3, row_d3);
-  auto row_d4 = _mm512_max_epi64(row_c3, row_d3);
-  auto row_e4 = _mm512_min_epi64(row_e3, row_f3);
-  auto row_f4 = _mm512_max_epi64(row_e3, row_f3);
-  auto row_g4 = _mm512_min_epi64(row_g3, row_h3);
-  auto row_h4 = _mm512_max_epi64(row_g3, row_h3);
-  /* 4. level of sorting network */
-  auto row_c5 = _mm512_min_epi64(row_c4, row_e4);
-  auto row_e5 = _mm512_max_epi64(row_c4, row_e4);
-  auto row_d5 = _mm512_min_epi64(row_d4, row_f4);
-  auto row_f5 = _mm512_max_epi64(row_d4, row_f4);
-  /* 5. level of sorting network */
-  auto row_b5 = _mm512_min_epi64(row_b4, row_e5);
-  auto row_e6 = _mm512_max_epi64(row_b4, row_e5);
-  auto row_d6 = _mm512_min_epi64(row_d5, row_g4);
-  auto row_g5 = _mm512_max_epi64(row_d5, row_g4);
-  /* 6. level of sorting network */
-  auto row_b6 = _mm512_min_epi64(row_b5, row_c5);
-  auto row_c6 = _mm512_max_epi64(row_b5, row_c5);
-  auto row_d7 = _mm512_min_epi64(row_d6, row_e6);
-  auto row_e7 = _mm512_max_epi64(row_d6, row_e6);
-  auto row_f6 = _mm512_min_epi64(row_f5, row_g5);
-  auto row_g6 = _mm512_max_epi64(row_f5, row_g5);
-
-  avx512_transpose_8x8(row_a4, row_b6, row_c6, row_d7, row_e7, row_f5, row_g6,
-                       row_h4);
-
-  _mm512_store_epi64(output, row_a4);
-  _mm512_store_epi64(output + 8, row_b6);
-  _mm512_store_epi64(output + 16, row_c6);
-  _mm512_store_epi64(output + 24, row_d7);
-  _mm512_store_epi64(output + 32, row_e7);
-  _mm512_store_epi64(output + 40, row_f5);
-  _mm512_store_epi64(output + 48, row_g6);
-  _mm512_store_epi64(output + 56, row_h4);
+template <typename T>
+inline void bitonic4_merge(Vec<T> in1, Vec<T> in2, Vec<T> &out1, Vec<T> &out2) {
+  in2 = reverse4(in2);
+  bitonic4(in1, in2, out1, out2);
 }
 
-constexpr auto DATA_SIZE = size_t{589824};
-alignas(64) auto input = std::array<int64_t, DATA_SIZE>{};
-alignas(64) auto output_avx2 = std::array<int64_t, DATA_SIZE>{};
-alignas(64) auto output_avx512 = std::array<int64_t, DATA_SIZE>{};
+template <typename T>
+inline void __attribute((always_inline)) x86_sort4x4(const T *data, T *output) {
+  // Sorting Network
+  constexpr auto TYPE_SIZE = sizeof(T);
+  constexpr auto BYTE_OFFSET = 256 / (TYPE_SIZE * TYPE_SIZE);
+  // NOLINTBEGIN
+  using VecAligned = AlignedVec<T>;
+  auto row_0 = *reinterpret_cast<const VecAligned *>(data);
+  auto row_1 = *reinterpret_cast<const VecAligned *>(data + BYTE_OFFSET);
+  auto row_2 = *reinterpret_cast<const VecAligned *>(data + BYTE_OFFSET * 2);
+  auto row_3 = *reinterpret_cast<const VecAligned *>(data + BYTE_OFFSET * 3);
+
+  auto temp_a = __builtin_elementwise_min(row_0, row_2);
+  auto temp_b = __builtin_elementwise_max(row_0, row_2);
+  auto temp_c = __builtin_elementwise_min(row_1, row_3);
+  auto temp_d = __builtin_elementwise_max(row_1, row_3);
+  auto temp_e = __builtin_elementwise_max(temp_a, temp_c);
+  auto temp_f = __builtin_elementwise_min(temp_b, temp_d);
+
+  row_0 = __builtin_elementwise_min(temp_a, temp_c);
+  row_1 = __builtin_elementwise_min(temp_e, temp_f);
+  row_2 = __builtin_elementwise_max(temp_e, temp_f);
+  row_3 = __builtin_elementwise_max(temp_b, temp_d);
+  // NOLINTEND
+
+  // Transpose Matrix
+  auto ab_lo = __builtin_shufflevector(row_0, row_1, INTERLEAVE_LOWERS);
+  auto ab_hi = __builtin_shufflevector(row_0, row_1, INTERLEAVE_UPPERS);
+  auto cd_lo = __builtin_shufflevector(row_2, row_3, INTERLEAVE_LOWERS);
+  auto cd_hi = __builtin_shufflevector(row_2, row_3, INTERLEAVE_UPPERS);
+
+  row_0 = __builtin_shufflevector(ab_lo, cd_lo, LOWER_HAVES);
+  row_1 = __builtin_shufflevector(ab_lo, cd_lo, UPPER_HAVES);
+  row_2 = __builtin_shufflevector(ab_hi, cd_hi, LOWER_HAVES);
+  row_3 = __builtin_shufflevector(ab_hi, cd_hi, UPPER_HAVES);
+
+  // Write to output
+  store_vec(row_0, output);
+  store_vec(row_1, output + 4);
+  store_vec(row_2, output + 8);
+  store_vec(row_3, output + 12);
+}
+
+inline void __attribute__((always_inline)) sort_chunk(uint64_t *inputptr,
+                                                      uint64_t *outputptr) {
+  auto ptrs = std::array<uint64_t *, 2>{};
+  ptrs[0] = inputptr;
+  ptrs[1] = outputptr;
+  auto *inptr = reinterpret_cast<block16 *>(ptrs[0]);
+  auto *const end = inptr + BLOCK_SIZE;
+  while (inptr < end) {
+    x86_sort4x4(reinterpret_cast<uint64_t *>(inptr),
+                reinterpret_cast<uint64_t *>(inptr));
+    ++inptr;
+  }
+}
 
 int main() {
-  using std::chrono::duration;
-  using std::chrono::duration_cast;
-  using std::chrono::high_resolution_clock;
-  using std::chrono::nanoseconds;
 
-  unsigned int seed = 12345;
-  std::mt19937 gen(seed); // mersenne_twister_engine seeded with rd()
-  std::uniform_int_distribution<int64_t> distrib(1, 1000000);
+  std::random_device rnd;  // Obtain a random number from hardware
+  std::mt19937 gen(rnd()); // Seed the generator
+  std::uniform_int_distribution<> dis(0, 100); // Define the range
 
-  for (auto i = size_t{0}; i < DATA_SIZE; ++i) {
-    input[i] = distrib(gen);
+  alignas(64) auto data = std::vector<uint64_t>(BLOCK_SIZE);
+
+  for (auto &value : data) {
+    value = dis(gen);
   }
 
-  // auto start = high_resolution_clock::now();
-  // for (auto i = size_t{0}; i < DATA_SIZE; i += 64) {
-  //   simd_sort8x64(input.data() + i, output.data() + i);
+  for (size_t i = 0; i < data.size(); ++i) {
+    std::cout << "data[" << i << "] = " << data[i] << std::endl;
+  }
+
+  // std::cout << "4x4 AVX Sort with compiler intrinsics!" << std::endl;
+  // alignas(64) auto data =
+  //     std::vector<uint64_t>{1, 17, 5, 8, 3, 2, 5, 9, 4, 32, 1, 11, 0, 5, 6,
+  //     10};
+  // x86_sort4x4(data.data(), data.data());
+  // for (int idx = 0; auto &val : data) {
+  //   if (idx > 0 && idx % 4 == 0) {
+  //     std::cout << std::endl;
+  //   }
+  //   std::cout << val << " ";
+  //   ++idx;
   // }
-  // auto end = high_resolution_clock::now();
 
-  auto start = high_resolution_clock::now();
-  for (auto i = size_t{0}; i < DATA_SIZE; i += 16) {
-    auto *start = input.data() + i;
-    auto *check = output_avx2.data() + i;
-    simd_sort4x64(&input[i], &output_avx2[i]);
-  }
-  auto end = high_resolution_clock::now();
-  auto ns_int = duration_cast<nanoseconds>(end - start);
-  std::cout << "took " << ns_int.count() << " ns." << std::endl;
+  // std::cout << std::endl << "Test bitonic4_merge" << std::endl;
+  //
+  // auto row_0 = *reinterpret_cast<const AlignedVec<uint64_t> *>(data.data());
+  // auto row_1 = *reinterpret_cast<const AlignedVec<uint64_t> *>(data.data() +
+  // 4);
+  //
+  // bitonic4_merge(row_0, row_1, row_0, row_1);
+  //
+  // store_vec(row_0, data.data());
+  // store_vec(row_1, data.data() + 4);
+  //
+  // for (int idx = 0; auto &val : data) {
+  //   if (idx > 0 && idx % 4 == 0) {
+  //     std::cout << std::endl;
+  //   }
+  //   std::cout << val << " ";
+  //   ++idx;
+  // }
 
   return 0;
 }
