@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -426,11 +427,11 @@ constexpr size_t cilog2(uint64_t val) {
 }
 
 template <typename T>
-inline void __attribute__((always_inline)) sort_block(T *inputptr,
-                                                      T *outputptr) {
+inline void __attribute__((always_inline)) simd_sort_block(T *&input_ptr,
+                                                           T *&output_ptr) {
   auto ptrs = std::array<T *, 2>{};
-  ptrs[0] = inputptr;
-  ptrs[1] = outputptr;
+  ptrs[0] = input_ptr;
+  ptrs[1] = output_ptr;
   // Apply 4x4 Sorting network.
   {
     auto *inptr = reinterpret_cast<block16 *>(ptrs[0]);
@@ -463,6 +464,20 @@ inline void __attribute__((always_inline)) sort_block(T *inputptr,
   for (auto level = size_t{4}; level < STOP_LEVEL; ++level) {
     merge_level(level, &merge16_eqlen<T>);
   }
+
+  auto input_length = 1u << STOP_LEVEL;
+  auto ptr_index = STOP_LEVEL & 1u;
+  auto *input = ptrs[ptr_index];
+  auto *output = ptrs[ptr_index ^ 1u];
+
+  merge16_eqlen<T>(input, input + input_length, output, input_length);
+  merge16_eqlen<T>(input + 2 * input_length, input + 3 * input_length,
+                   output + 2 * input_length, input_length);
+  input_length <<= 1u;
+  // NOLINTNEXTLINE
+  merge16_eqlen<T>(output, output + input_length, input, input_length);
+  input_ptr = output;
+  output_ptr = input;
 }
 
 int main() {
@@ -472,38 +487,20 @@ int main() {
   std::uniform_int_distribution<> dis(0, 100);
 
   alignas(32) auto data = std::vector<uint64_t>(BLOCK_SIZE);
+  alignas(32) auto cmp_data = std::vector<uint64_t>(BLOCK_SIZE);
   alignas(32) auto output = std::vector<uint64_t>(BLOCK_SIZE);
-  for (auto &value : data) {
-    value = dis(gen);
+  for (auto index = size_t{0}; index < BLOCK_SIZE; ++index) {
+    const auto val = dis(gen);
+    data[index] = val;
+    cmp_data[index] = val;
   }
   std::cout << "============= Sort data =============" << std::endl;
-  sort_block(data.data(), output.data());
+  auto *input_ptr = data.data();
+  auto *output_ptr = output.data();
 
-  constexpr auto ROW_LENGTH = 64;
-
-  for (int idx = 0; auto &val : data) {
-    if (idx > 0 && idx % ROW_LENGTH == 0) {
-      std::cout << std::endl;
-    }
-    std::cout << val << " ";
-    ++idx;
-    if (idx >= ROW_LENGTH * 10) {
-      break;
-    }
-  }
-
-  std::cout << std::endl << "===== Output ====" << std::endl;
-
-  for (int idx = 0; auto &val : output) {
-    if (idx > 0 && idx % ROW_LENGTH == 0) {
-      std::cout << std::endl;
-    }
-    std::cout << val << " ";
-    ++idx;
-    if (idx >= ROW_LENGTH * 10) {
-      break;
-    }
-  }
-
+  simd_sort_block(input_ptr, output_ptr);
+  std::ranges::sort(cmp_data);
+  assert(data == cmp_data);
+  assert(std::ranges::is_sorted(data));
   return 0;
 }
