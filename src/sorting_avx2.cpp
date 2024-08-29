@@ -19,9 +19,15 @@ using UnalignedVec __attribute__((aligned(1))) = Vec<uint64_t>;
 template <typename T> using AlignedVec __attribute__((aligned(32))) = Vec<T>;
 
 using vec64_t = Vec<uint64_t>;
-using block16 = struct alignas(128) {};
-using block8 = struct alignas(64) {};
-using block4 = struct alignas(32) {};
+using block4 = struct Block4 {
+  std::array<uint64_t, 4> val;
+};
+using block8 = struct Block8 {
+  std::array<uint64_t, 8> val;
+};
+using block16 = struct Block16 {
+  std::array<uint64_t, 16> val;
+};
 
 template <typename T>
 inline void __attribute((always_inline)) store_vec(Vec<T> data,
@@ -30,15 +36,21 @@ inline void __attribute((always_inline)) store_vec(Vec<T> data,
   *out_vec = data;
 }
 
-template <typename T> inline Vec<T> reverse4(Vec<T> vec) {
-  return __builtin_shufflevector(vec, vec, 3, 2, 1, 0);
+template <typename T> inline void debug_print_register(Vec<T> reg) {
+  std::cout << "register: " << reg[0] << ", " << reg[1] << ", " << reg[2]
+            << ", " << reg[3] << std::endl;
+}
+
+template <typename T> inline void reverse4(Vec<T> &vec) {
+  vec = __builtin_shufflevector(vec, vec, 3, 2, 1, 0);
 }
 
 template <typename BlockType, typename T>
   requires(sizeof(T) == 8)
 inline void __attribute__((always_inline))
-choose_next_predicated(BlockType *next, BlockType *a_ptr, BlockType *b_ptr) {
-  int8_t cmp = *reinterpret_cast<T *>(a_ptr) < *reinterpret_cast<T *>(b_ptr);
+choose_next_predicated(BlockType *&next, BlockType *&a_ptr, BlockType *&b_ptr) {
+  const auto cmp =
+      *reinterpret_cast<T *>(a_ptr) < *reinterpret_cast<T *>(b_ptr);
   next = cmp ? a_ptr : b_ptr;
   a_ptr += cmp;
   b_ptr += !cmp;
@@ -66,8 +78,21 @@ inline void bitonic4(Vec<T> in1, Vec<T> in2, Vec<T> &out1, Vec<T> &out2) {
 }
 
 template <typename T>
+inline void bitonic8(Vec<T> in11, Vec<T> in12, Vec<T> in21, Vec<T> in22,
+                     Vec<T> &out1, Vec<T> &out2, Vec<T> &out3, Vec<T> &out4) {
+  // NOLINTBEGIN
+  auto l11 = __builtin_elementwise_min(in11, in21);
+  auto l12 = __builtin_elementwise_min(in12, in22);
+  auto h11 = __builtin_elementwise_max(in11, in21);
+  auto h12 = __builtin_elementwise_max(in12, in22);
+  // NOLINTEND
+  bitonic4(l11, l12, out1, out2);
+  bitonic4(h11, h12, out3, out4);
+}
+
+template <typename T>
 inline void bitonic4_merge(Vec<T> in1, Vec<T> in2, Vec<T> &out1, Vec<T> &out2) {
-  in2 = reverse4(in2);
+  reverse4(in2);
   bitonic4(in1, in2, out1, out2);
 }
 
@@ -83,41 +108,50 @@ inline void bitonic8_merge(Vec<T> in11, Vec<T> in12, Vec<T> in21, Vec<T> in22,
   auto h11 = __builtin_elementwise_max(in11, in22);
   auto h12 = __builtin_elementwise_max(in12, in21);
   // NOLINTEND
-  bitonic4_merge(l11, l12, out1, out2);
-  bitonic4_merge(h11, h12, out3, out4);
+  bitonic4(l11, l12, out1, out2);
+  bitonic4(h11, h12, out3, out4);
 }
-//
-// template <typename T>
-// inline void bitonic16_merge(Vec<T> in11, Vec<T> in12, Vec<T> in13, Vec<T>
-// in14,
-//                             Vec<T> in21, Vec<T> in22, Vec<T> in23, Vec<T>
-//                             in24, Vec<T> &out1, Vec<T> &out2, Vec<T> &out3,
-//                             Vec<T> &out4, Vec<T> &out5, Vec<T> &out6,
-//                             Vec<T> &out7, Vec<T> &out8) {
-//   reverse4(in21);
-//   reverse4(in22);
-//   reverse4(in23);
-//   reverse4(in24);
-//   // NOLINTBEGIN
-//   auto l01 = __builtin_elementwise_min(in11, in24);
-//   auto l02 = __builtin_elementwise_min(in12, in23);
-//   auto l03 = __builtin_elementwise_min(in13, in22);
-//   auto l04 = __builtin_elementwise_min(in14, in21);
-//   auto h01 = __builtin_elementwise_max(in11, in24);
-//   auto h02 = __builtin_elementwise_max(in12, in23);
-//   auto h03 = __builtin_elementwise_max(in13, in22);
-//   auto h04 = __builtin_elementwise_max(in14, in21);
-//   // NOLINTEND
-// }
+
+template <typename T>
+inline void bitonic16_merge(Vec<T> in11, Vec<T> in12, Vec<T> in13, Vec<T> in14,
+                            Vec<T> in21, Vec<T> in22, Vec<T> in23, Vec<T> in24,
+                            Vec<T> &out1, Vec<T> &out2, Vec<T> &out3,
+                            Vec<T> &out4, Vec<T> &out5, Vec<T> &out6,
+                            Vec<T> &out7, Vec<T> &out8) {
+  reverse4(in21);
+  reverse4(in22);
+  reverse4(in23);
+  reverse4(in24);
+  // NOLINTBEGIN
+  auto l01 = __builtin_elementwise_min(in11, in24);
+  auto l02 = __builtin_elementwise_min(in12, in23);
+  auto l03 = __builtin_elementwise_min(in13, in22);
+  auto l04 = __builtin_elementwise_min(in14, in21);
+  auto h01 = __builtin_elementwise_max(in11, in24);
+  auto h02 = __builtin_elementwise_max(in12, in23);
+  auto h03 = __builtin_elementwise_max(in13, in22);
+  auto h04 = __builtin_elementwise_max(in14, in21);
+  // std::cout << "+++" << std::endl;
+  // debug_print_register(l01);
+  // debug_print_register(l02);
+  // debug_print_register(l03);
+  // debug_print_register(l04);
+  // std::cout << "+++" << std::endl;
+
+  // NOLINTEND
+  bitonic8(l01, l02, l03, l04, out1, out2, out3, out4);
+  bitonic8(h01, h02, h03, h04, out5, out6, out7, out8);
+}
 
 template <typename T>
 inline __attribute((always_inline)) Vec<T> load_vec(T *addr) {
   return {addr[0], addr[1], addr[2], addr[3]};
 }
 
-template <typename T>
-inline __attribute((always_inline)) void load8(Vec<T> &reg_lo, Vec<T> &reg_hi,
-                                               T *addr) {
+template <typename BlockType, typename ValueType>
+inline __attribute((always_inline)) void
+load8(Vec<ValueType> &reg_lo, Vec<ValueType> &reg_hi, BlockType *block_addr) {
+  auto *addr = reinterpret_cast<ValueType *>(block_addr);
   reg_lo = {addr[0], addr[1], addr[2], addr[3]};
   reg_hi = {addr[4], addr[5], addr[6], addr[7]};
 }
@@ -128,11 +162,6 @@ inline __attribute((always_inline)) void store8(Vec<T> &reg_lo, Vec<T> &reg_hi,
   store_vec(reg_lo, reinterpret_cast<T *>(addr));
   store_vec(reg_hi, reinterpret_cast<T *>(addr + 1));
 }
-
-// template <typename T> inline void debug_print_register(Vec<T> reg) {
-//   std::cout << "register: " << reg[0] << ", " << reg[1] << ", " << reg[2]
-//             << ", " << reg[3] << std::endl;
-// }
 
 template <typename T>
   requires(sizeof(T) == 8)
@@ -208,8 +237,8 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
   auto b_loaded1 = Vec<T>{};
   auto b_loaded2 = Vec<T>{};
 
-  load8(a_loaded1, a_loaded2, reinterpret_cast<T *>(a_ptr));
-  load8(b_loaded1, b_loaded2, reinterpret_cast<T *>(b_ptr));
+  load8(a_loaded1, a_loaded2, a_ptr);
+  load8(b_loaded1, b_loaded2, b_ptr);
   ++a_ptr;
   ++b_ptr;
   bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
@@ -220,14 +249,14 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
     choose_next_predicated<block8, T>(next, a_ptr, b_ptr);
     a_loaded1 = output_hi1;
     a_loaded2 = output_hi2;
-    load8(b_loaded1, b_loaded2, reinterpret_cast<T *>(next));
+    load8(b_loaded1, b_loaded2, next);
     bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
                    output_lo2, output_hi1, output_hi2);
     store8(output_lo1, output_lo2, reinterpret_cast<block4 *>(output_ptr));
     ++output_ptr;
   }
   while (a_ptr < a_end) {
-    load8(a_loaded1, a_loaded2, reinterpret_cast<T *>(a_ptr));
+    load8(a_loaded1, a_loaded2, a_ptr);
     b_loaded1 = output_hi1;
     b_loaded2 = output_hi2;
     bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
@@ -239,7 +268,7 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
   while (b_ptr < b_end) {
     a_loaded1 = output_hi1;
     a_loaded2 = output_hi2;
-    load8(b_loaded1, b_loaded2, reinterpret_cast<T *>(b_ptr));
+    load8(b_loaded1, b_loaded2, b_ptr);
     bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
                    output_lo2, output_hi1, output_hi2);
     store8(output_lo1, output_lo2, reinterpret_cast<block4 *>(output_ptr));
@@ -249,22 +278,124 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
   store8(output_hi1, output_hi2, reinterpret_cast<block4 *>(output_ptr));
 }
 
+template <typename T>
+  requires(sizeof(T) == 8)
+inline void __attribute((always_inline))
+merge16_eqlen(T *const input_a, T *const input_b, T *const output,
+              const size_t length) {
+
+  auto *a_ptr = reinterpret_cast<block16 *>(input_a);
+  auto *b_ptr = reinterpret_cast<block16 *>(input_b);
+  auto *const a_end = reinterpret_cast<block16 *>(input_a + length);
+  auto *const b_end = reinterpret_cast<block16 *>(input_b + length);
+
+  auto *output_ptr = reinterpret_cast<block16 *>(output);
+  auto *next = b_ptr;
+
+  auto reg_out1l1 = Vec<T>{};
+  auto reg_out1l2 = Vec<T>{};
+  auto reg_out1h1 = Vec<T>{};
+  auto reg_out1h2 = Vec<T>{};
+
+  auto reg_out2l1 = Vec<T>{};
+  auto reg_out2l2 = Vec<T>{};
+  auto reg_out2h1 = Vec<T>{};
+  auto reg_out2h2 = Vec<T>{};
+
+  auto reg_al1 = Vec<T>{};
+  auto reg_al2 = Vec<T>{};
+  auto reg_ah1 = Vec<T>{};
+  auto reg_ah2 = Vec<T>{};
+
+  auto reg_bl1 = Vec<T>{};
+  auto reg_bl2 = Vec<T>{};
+  auto reg_bh1 = Vec<T>{};
+  auto reg_bh2 = Vec<T>{};
+
+  load8(reg_al1, reg_al2, a_ptr);
+  load8(reg_ah1, reg_ah2, reinterpret_cast<block8 *>(a_ptr) + 1);
+  ++a_ptr;
+
+  load8(reg_bl1, reg_bl2, b_ptr);
+  load8(reg_bh1, reg_bh2, reinterpret_cast<block8 *>(b_ptr) + 1);
+  ++b_ptr;
+
+  bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2, reg_bh1,
+                  reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1, reg_out1h2,
+                  reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
+
+  store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
+  store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+  ++output_ptr;
+
+  while (a_ptr < a_end && b_ptr < b_end) {
+    choose_next_predicated<block16, T>(next, a_ptr, b_ptr);
+    reg_al1 = reg_out2l1;
+    reg_al2 = reg_out2l2;
+    reg_ah1 = reg_out2h1;
+    reg_ah2 = reg_out2h2;
+    load8(reg_bl1, reg_bl2, reinterpret_cast<block8 *>(next));
+    load8(reg_bh1, reg_bh2, reinterpret_cast<block8 *>(next) + 1);
+
+    bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
+                    reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
+                    reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
+    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
+    store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+    ++output_ptr;
+  }
+
+  while (a_ptr < a_end) {
+    reg_bl1 = reg_out2l1;
+    reg_bl2 = reg_out2l2;
+    reg_bh1 = reg_out2h1;
+    reg_bh2 = reg_out2h2;
+    load8(reg_al1, reg_al2, reinterpret_cast<block8 *>(a_ptr));
+    load8(reg_ah1, reg_ah2, reinterpret_cast<block8 *>(a_ptr) + 1);
+    ++a_ptr;
+    bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
+                    reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
+                    reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
+    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
+    store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+    ++output_ptr;
+  }
+
+  while (b_ptr < b_end) {
+    reg_al1 = reg_out2l1;
+    reg_al2 = reg_out2l2;
+    reg_ah1 = reg_out2h1;
+    reg_ah2 = reg_out2h2;
+    load8(reg_bl1, reg_bl2, reinterpret_cast<block8 *>(b_ptr));
+    load8(reg_bh1, reg_bh2, reinterpret_cast<block8 *>(b_ptr) + 1);
+    ++b_ptr;
+    bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
+                    reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
+                    reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
+    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
+    store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+    ++output_ptr;
+  }
+
+  store8(reg_out2l1, reg_out2l2, reinterpret_cast<block4 *>(output_ptr));
+  store8(reg_out2h1, reg_out2h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+}
+
 template <typename T> void sort4x4(T *data, T *output) {
   constexpr auto TYPE_SIZE = sizeof(T);
   constexpr auto BYTE_OFFSET = 256 / (TYPE_SIZE * TYPE_SIZE);
-  // NOLINTBEGIN
-  auto row_0 = (Vec<T>){data[0], data[1], data[2], data[3]};
-  auto row_1 = (Vec<T>){data[4], data[5], data[6], data[7]};
-  auto row_2 = (Vec<T>){data[8], data[9], data[10], data[11]};
-  auto row_3 = (Vec<T>){data[12], data[13], data[14], data[15]};
+  auto row_0 = load_vec(data);
+  auto row_1 = load_vec(data + BYTE_OFFSET);
+  auto row_2 = load_vec(data + BYTE_OFFSET * 2);
+  auto row_3 = load_vec(data + BYTE_OFFSET * 3);
 
+  // NOLINTBEGIN
   auto temp_a = __builtin_elementwise_min(row_0, row_2);
   auto temp_b = __builtin_elementwise_max(row_0, row_2);
   auto temp_c = __builtin_elementwise_min(row_1, row_3);
   auto temp_d = __builtin_elementwise_max(row_1, row_3);
   auto temp_e = __builtin_elementwise_max(temp_a, temp_c);
   auto temp_f = __builtin_elementwise_min(temp_b, temp_d);
-
   row_0 = __builtin_elementwise_min(temp_a, temp_c);
   row_1 = __builtin_elementwise_min(temp_e, temp_f);
   row_2 = __builtin_elementwise_max(temp_e, temp_f);
@@ -327,11 +458,11 @@ inline void __attribute__((always_inline)) sort_block(T *inputptr,
       output += output_length;
     }
   };
-  merge_level(2, &merge4_eqlen<T>); // read input -> write to output.
-  merge_level(3, &merge8_eqlen<T>); // read output -> write to input.
-  // for (auto level = size_t{4}; level < STOP_LEVEL; ++level) {
-  //   merge_level(level, &merge16_eqlen<T>);
-  // }
+  merge_level(2, &merge4_eqlen<T>); // input -> output
+  merge_level(3, &merge8_eqlen<T>); // output -> input
+  for (auto level = size_t{4}; level < STOP_LEVEL; ++level) {
+    merge_level(level, &merge16_eqlen<T>);
+  }
 }
 
 int main() {
@@ -348,13 +479,15 @@ int main() {
   std::cout << "============= Sort data =============" << std::endl;
   sort_block(data.data(), output.data());
 
+  constexpr auto ROW_LENGTH = 64;
+
   for (int idx = 0; auto &val : data) {
-    if (idx > 0 && idx % 16 == 0) {
+    if (idx > 0 && idx % ROW_LENGTH == 0) {
       std::cout << std::endl;
     }
     std::cout << val << " ";
     ++idx;
-    if (idx >= 160) {
+    if (idx >= ROW_LENGTH * 10) {
       break;
     }
   }
@@ -362,12 +495,12 @@ int main() {
   std::cout << std::endl << "===== Output ====" << std::endl;
 
   for (int idx = 0; auto &val : output) {
-    if (idx > 0 && idx % 16 == 0) {
+    if (idx > 0 && idx % ROW_LENGTH == 0) {
       std::cout << std::endl;
     }
     std::cout << val << " ";
     ++idx;
-    if (idx >= 160) {
+    if (idx >= ROW_LENGTH * 10) {
       break;
     }
   }
