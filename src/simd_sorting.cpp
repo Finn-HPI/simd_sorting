@@ -37,7 +37,7 @@ inline void __attribute((always_inline)) store_vec(Vec<T> data,
   *out_vec = data;
 }
 
-template <typename T> inline void debug_print_register(Vec<T> reg) {
+template <typename T> inline void debug_print_registe(Vec<T> reg) {
   std::cout << "register: " << reg[0] << ", " << reg[1] << ", " << reg[2]
             << ", " << reg[3] << std::endl;
 }
@@ -49,10 +49,15 @@ template <typename T> inline void reverse4(Vec<T> &vec) {
 template <typename BlockType, typename T>
   requires(sizeof(T) == 8)
 inline void __attribute__((always_inline))
-choose_next_predicated(BlockType *&next, BlockType *&a_ptr, BlockType *&b_ptr) {
-  const auto cmp =
+choose_next_and_update_pointers(BlockType *&next, BlockType *&a_ptr,
+                                BlockType *&b_ptr) {
+  const int8_t cmp =
       *reinterpret_cast<T *>(a_ptr) < *reinterpret_cast<T *>(b_ptr);
   next = cmp ? a_ptr : b_ptr;
+  // next =
+  //     reinterpret_cast<BlockType *>(cmp * reinterpret_cast<int64_t>(a_ptr) +
+  //                                   !cmp *
+  //                                   (reinterpret_cast<int64_t>(b_ptr)));
   a_ptr += cmp;
   b_ptr += !cmp;
 }
@@ -132,13 +137,6 @@ inline void bitonic16_merge(Vec<T> in11, Vec<T> in12, Vec<T> in13, Vec<T> in14,
   auto h02 = __builtin_elementwise_max(in12, in23);
   auto h03 = __builtin_elementwise_max(in13, in22);
   auto h04 = __builtin_elementwise_max(in14, in21);
-  // std::cout << "+++" << std::endl;
-  // debug_print_register(l01);
-  // debug_print_register(l02);
-  // debug_print_register(l03);
-  // debug_print_register(l04);
-  // std::cout << "+++" << std::endl;
-
   // NOLINTEND
   bitonic8(l01, l02, l03, l04, out1, out2, out3, out4);
   bitonic8(h01, h02, h03, h04, out5, out6, out7, out8);
@@ -187,7 +185,7 @@ merge4_eqlen(T *const input_a, T *const input_b, T *const output,
   ++output_ptr;
   // As long as both A and B are not empty, do fetch and 2x4 merge.
   while (a_ptr < a_end && b_ptr < b_end) {
-    choose_next_predicated<block4, T>(next, a_ptr, b_ptr);
+    choose_next_and_update_pointers<block4, T>(next, a_ptr, b_ptr);
     a_loaded = output_hi;
     b_loaded = load_vec<T>(reinterpret_cast<T *>(next));
     bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
@@ -247,7 +245,7 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
   store8(output_lo1, output_lo2, reinterpret_cast<block4 *>(output_ptr));
   ++output_ptr;
   while (a_ptr < a_end && b_ptr < b_end) {
-    choose_next_predicated<block8, T>(next, a_ptr, b_ptr);
+    choose_next_and_update_pointers<block8, T>(next, a_ptr, b_ptr);
     a_loaded1 = output_hi1;
     a_loaded2 = output_hi2;
     load8(b_loaded1, b_loaded2, next);
@@ -330,7 +328,7 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
   ++output_ptr;
 
   while (a_ptr < a_end && b_ptr < b_end) {
-    choose_next_predicated<block16, T>(next, a_ptr, b_ptr);
+    choose_next_and_update_pointers<block16, T>(next, a_ptr, b_ptr);
     reg_al1 = reg_out2l1;
     reg_al2 = reg_out2l2;
     reg_ah1 = reg_out2h1;
@@ -461,6 +459,7 @@ inline void __attribute__((always_inline)) simd_sort_block(T *&input_ptr,
   };
   merge_level(2, &merge4_eqlen<T>); // input -> output
   merge_level(3, &merge8_eqlen<T>); // output -> input
+#pragma unroll
   for (auto level = size_t{4}; level < STOP_LEVEL; ++level) {
     merge_level(level, &merge16_eqlen<T>);
   }
@@ -498,6 +497,7 @@ int main() {
   auto *input_ptr = data.data();
   auto *output_ptr = output.data();
 
+  assert(!std::ranges::is_sorted(data));
   simd_sort_block(input_ptr, output_ptr);
   std::ranges::sort(cmp_data);
   assert(data == cmp_data);
