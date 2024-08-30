@@ -23,8 +23,8 @@ inline void __attribute__((always_inline)) simd_sort_block(T *&input_ptr,
   ptrs[1] = output_ptr;
   // Apply 4x4 Sorting network.
   {
-    auto *inptr = reinterpret_cast<block16 *>(ptrs[0]);
-    auto *const end = reinterpret_cast<block16 *>(ptrs[0] + BLOCK_SIZE);
+    auto *inptr = reinterpret_cast<block16_t *>(ptrs[0]);
+    auto *const end = reinterpret_cast<block16_t *>(ptrs[0] + BLOCK_SIZE);
     while (inptr < end) {
       sort4x4(reinterpret_cast<T *>(inptr), reinterpret_cast<T *>(inptr));
       ++inptr;
@@ -84,7 +84,7 @@ int main() {
     data[index] = val;
     cmp_data[index] = val;
   }
-  std::cout << "============= Sort data =============" << std::endl;
+
   auto *input_ptr = data.data();
   auto *output_ptr = output.data();
 

@@ -15,9 +15,9 @@ template <typename T> using Vec __attribute__((vector_size(32))) = T;
 using UnalignedVec __attribute__((aligned(1))) = Vec<uint64_t>;
 template <typename T> using AlignedVec __attribute__((aligned(32))) = Vec<T>;
 
-using block4 = struct alignas(32) {};
-using block8 = struct alignas(64) {};
-using block16 = struct alignas(128) {};
+using block4_t = struct alignas(32) {};
+using block8_t = struct alignas(64) {};
+using block16_t = struct alignas(128) {};
 
 // Loading and Storing SIMD registers.
 
@@ -43,7 +43,7 @@ load8(Vec<ValueType> &reg_lo, Vec<ValueType> &reg_hi, BlockType *block_addr) {
 
 template <typename T>
 inline __attribute((always_inline)) void store8(Vec<T> &reg_lo, Vec<T> &reg_hi,
-                                                block4 *addr) {
+                                                block4_t *addr) {
   store4(reg_lo, reinterpret_cast<T *>(addr));
   store4(reg_hi, reinterpret_cast<T *>(addr + 1));
 }
@@ -149,12 +149,12 @@ template <typename T>
 inline void __attribute((always_inline))
 merge4_eqlen(T *const input_a, T *const input_b, T *const output,
              const size_t length) {
-  auto *a_ptr = reinterpret_cast<block4 *>(input_a);
-  auto *b_ptr = reinterpret_cast<block4 *>(input_b);
-  auto *const a_end = reinterpret_cast<block4 *>(input_a + length);
-  auto *const b_end = reinterpret_cast<block4 *>(input_b + length);
+  auto *a_ptr = reinterpret_cast<block4_t *>(input_a);
+  auto *b_ptr = reinterpret_cast<block4_t *>(input_b);
+  auto *const a_end = reinterpret_cast<block4_t *>(input_a + length);
+  auto *const b_end = reinterpret_cast<block4_t *>(input_b + length);
 
-  auto *output_ptr = reinterpret_cast<block4 *>(output);
+  auto *output_ptr = reinterpret_cast<block4_t *>(output);
   auto *next = b_ptr;
   auto output_lo = Vec<T>{};
   auto output_hi = Vec<T>{};
@@ -167,7 +167,7 @@ merge4_eqlen(T *const input_a, T *const input_b, T *const output,
   ++output_ptr;
   // As long as both A and B are not empty, do fetch and 2x4 merge.
   while (a_ptr < a_end && b_ptr < b_end) {
-    choose_next_and_update_pointers<block4, T>(next, a_ptr, b_ptr);
+    choose_next_and_update_pointers<block4_t, T>(next, a_ptr, b_ptr);
     a_loaded = output_hi;
     b_loaded = load4<T>(reinterpret_cast<T *>(next));
     bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
@@ -199,12 +199,12 @@ template <typename T>
 inline void __attribute((always_inline))
 merge8_eqlen(T *const input_a, T *const input_b, T *const output,
              const size_t length) {
-  auto *a_ptr = reinterpret_cast<block8 *>(input_a);
-  auto *b_ptr = reinterpret_cast<block8 *>(input_b);
-  auto *const a_end = reinterpret_cast<block8 *>(input_a + length);
-  auto *const b_end = reinterpret_cast<block8 *>(input_b + length);
+  auto *a_ptr = reinterpret_cast<block8_t *>(input_a);
+  auto *b_ptr = reinterpret_cast<block8_t *>(input_b);
+  auto *const a_end = reinterpret_cast<block8_t *>(input_a + length);
+  auto *const b_end = reinterpret_cast<block8_t *>(input_b + length);
 
-  auto *output_ptr = reinterpret_cast<block8 *>(output);
+  auto *output_ptr = reinterpret_cast<block8_t *>(output);
   auto *next = b_ptr;
 
   auto output_lo1 = Vec<T>{};
@@ -223,16 +223,16 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
   ++b_ptr;
   bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
                  output_lo2, output_hi1, output_hi2);
-  store8(output_lo1, output_lo2, reinterpret_cast<block4 *>(output_ptr));
+  store8(output_lo1, output_lo2, reinterpret_cast<block4_t *>(output_ptr));
   ++output_ptr;
   while (a_ptr < a_end && b_ptr < b_end) {
-    choose_next_and_update_pointers<block8, T>(next, a_ptr, b_ptr);
+    choose_next_and_update_pointers<block8_t, T>(next, a_ptr, b_ptr);
     a_loaded1 = output_hi1;
     a_loaded2 = output_hi2;
     load8(b_loaded1, b_loaded2, next);
     bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
                    output_lo2, output_hi1, output_hi2);
-    store8(output_lo1, output_lo2, reinterpret_cast<block4 *>(output_ptr));
+    store8(output_lo1, output_lo2, reinterpret_cast<block4_t *>(output_ptr));
     ++output_ptr;
   }
   while (a_ptr < a_end) {
@@ -241,7 +241,7 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
     b_loaded2 = output_hi2;
     bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
                    output_lo2, output_hi1, output_hi2);
-    store8(output_lo1, output_lo2, reinterpret_cast<block4 *>(output_ptr));
+    store8(output_lo1, output_lo2, reinterpret_cast<block4_t *>(output_ptr));
     ++output_ptr;
     ++a_ptr;
   }
@@ -251,11 +251,11 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
     load8(b_loaded1, b_loaded2, b_ptr);
     bitonic8_merge(a_loaded1, a_loaded2, b_loaded1, b_loaded2, output_lo1,
                    output_lo2, output_hi1, output_hi2);
-    store8(output_lo1, output_lo2, reinterpret_cast<block4 *>(output_ptr));
+    store8(output_lo1, output_lo2, reinterpret_cast<block4_t *>(output_ptr));
     ++output_ptr;
     ++b_ptr;
   }
-  store8(output_hi1, output_hi2, reinterpret_cast<block4 *>(output_ptr));
+  store8(output_hi1, output_hi2, reinterpret_cast<block4_t *>(output_ptr));
 }
 
 template <typename T>
@@ -263,12 +263,12 @@ inline void __attribute((always_inline))
 merge16_eqlen(T *const input_a, T *const input_b, T *const output,
               const size_t length) {
 
-  auto *a_ptr = reinterpret_cast<block16 *>(input_a);
-  auto *b_ptr = reinterpret_cast<block16 *>(input_b);
-  auto *const a_end = reinterpret_cast<block16 *>(input_a + length);
-  auto *const b_end = reinterpret_cast<block16 *>(input_b + length);
+  auto *a_ptr = reinterpret_cast<block16_t *>(input_a);
+  auto *b_ptr = reinterpret_cast<block16_t *>(input_b);
+  auto *const a_end = reinterpret_cast<block16_t *>(input_a + length);
+  auto *const b_end = reinterpret_cast<block16_t *>(input_b + length);
 
-  auto *output_ptr = reinterpret_cast<block16 *>(output);
+  auto *output_ptr = reinterpret_cast<block16_t *>(output);
   auto *next = b_ptr;
 
   auto reg_out1l1 = Vec<T>{};
@@ -292,35 +292,36 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
   auto reg_bh2 = Vec<T>{};
 
   load8(reg_al1, reg_al2, a_ptr);
-  load8(reg_ah1, reg_ah2, reinterpret_cast<block8 *>(a_ptr) + 1);
+  load8(reg_ah1, reg_ah2, reinterpret_cast<block8_t *>(a_ptr) + 1);
   ++a_ptr;
 
   load8(reg_bl1, reg_bl2, b_ptr);
-  load8(reg_bh1, reg_bh2, reinterpret_cast<block8 *>(b_ptr) + 1);
+  load8(reg_bh1, reg_bh2, reinterpret_cast<block8_t *>(b_ptr) + 1);
   ++b_ptr;
 
   bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2, reg_bh1,
                   reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1, reg_out1h2,
                   reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
 
-  store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
-  store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+  store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4_t *>(output_ptr));
+  store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4_t *>(output_ptr) + 2);
   ++output_ptr;
 
   while (a_ptr < a_end && b_ptr < b_end) {
-    choose_next_and_update_pointers<block16, T>(next, a_ptr, b_ptr);
+    choose_next_and_update_pointers<block16_t, T>(next, a_ptr, b_ptr);
     reg_al1 = reg_out2l1;
     reg_al2 = reg_out2l2;
     reg_ah1 = reg_out2h1;
     reg_ah2 = reg_out2h2;
-    load8(reg_bl1, reg_bl2, reinterpret_cast<block8 *>(next));
-    load8(reg_bh1, reg_bh2, reinterpret_cast<block8 *>(next) + 1);
+    load8(reg_bl1, reg_bl2, reinterpret_cast<block8_t *>(next));
+    load8(reg_bh1, reg_bh2, reinterpret_cast<block8_t *>(next) + 1);
 
     bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
                     reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
                     reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
-    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
-    store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4_t *>(output_ptr));
+    store8(reg_out1h1, reg_out1h2,
+           reinterpret_cast<block4_t *>(output_ptr) + 2);
     ++output_ptr;
   }
 
@@ -329,14 +330,15 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
     reg_bl2 = reg_out2l2;
     reg_bh1 = reg_out2h1;
     reg_bh2 = reg_out2h2;
-    load8(reg_al1, reg_al2, reinterpret_cast<block8 *>(a_ptr));
-    load8(reg_ah1, reg_ah2, reinterpret_cast<block8 *>(a_ptr) + 1);
+    load8(reg_al1, reg_al2, reinterpret_cast<block8_t *>(a_ptr));
+    load8(reg_ah1, reg_ah2, reinterpret_cast<block8_t *>(a_ptr) + 1);
     ++a_ptr;
     bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
                     reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
                     reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
-    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
-    store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4_t *>(output_ptr));
+    store8(reg_out1h1, reg_out1h2,
+           reinterpret_cast<block4_t *>(output_ptr) + 2);
     ++output_ptr;
   }
 
@@ -345,19 +347,20 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
     reg_al2 = reg_out2l2;
     reg_ah1 = reg_out2h1;
     reg_ah2 = reg_out2h2;
-    load8(reg_bl1, reg_bl2, reinterpret_cast<block8 *>(b_ptr));
-    load8(reg_bh1, reg_bh2, reinterpret_cast<block8 *>(b_ptr) + 1);
+    load8(reg_bl1, reg_bl2, reinterpret_cast<block8_t *>(b_ptr));
+    load8(reg_bh1, reg_bh2, reinterpret_cast<block8_t *>(b_ptr) + 1);
     ++b_ptr;
     bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
                     reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
                     reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
-    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4 *>(output_ptr));
-    store8(reg_out1h1, reg_out1h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+    store8(reg_out1l1, reg_out1l2, reinterpret_cast<block4_t *>(output_ptr));
+    store8(reg_out1h1, reg_out1h2,
+           reinterpret_cast<block4_t *>(output_ptr) + 2);
     ++output_ptr;
   }
 
-  store8(reg_out2l1, reg_out2l2, reinterpret_cast<block4 *>(output_ptr));
-  store8(reg_out2h1, reg_out2h2, reinterpret_cast<block4 *>(output_ptr) + 2);
+  store8(reg_out2l1, reg_out2l2, reinterpret_cast<block4_t *>(output_ptr));
+  store8(reg_out2h1, reg_out2h2, reinterpret_cast<block4_t *>(output_ptr) + 2);
 }
 
 template <typename T> void sort4x4(T *data, T *output) {
