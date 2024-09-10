@@ -195,6 +195,8 @@ merge4_eqlen(T *const input_a, T *const input_b, T *const output,
   store4(output_hi, reinterpret_cast<T *>(output_ptr));
 }
 
+// Bitonic merge algorithms for equal sized A and B.
+
 template <typename T>
 inline void __attribute((always_inline))
 merge8_eqlen(T *const input_a, T *const input_b, T *const output,
@@ -363,6 +365,72 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
   store8(reg_out2h1, reg_out2h2, reinterpret_cast<block4_t *>(output_ptr) + 2);
 }
 
+// Bitonic merge algorithms for variable sized A and B.
+
+template <typename T>
+inline void __attribute((always_inline))
+merge4_varlen(T *const input_a, T *const input_b, T *const output,
+              const size_t length_a, const size_t length_b) {
+  const auto length_a4 = length_a & ~0x3u;
+  const auto length_b4 = length_b & ~0x3u;
+
+  const auto a_index = size_t{0};
+  const auto b_index = size_t{0};
+
+  auto &output_ptr = output;
+
+  if (length_a4 > 4 && length_b4 > 4) {
+    auto *a_ptr = reinterpret_cast<block4_t *>(input_a);
+    auto *b_ptr = reinterpret_cast<block4_t *>(input_b);
+    auto *const a_end = reinterpret_cast<block4_t *>(
+        input_a + length_a); // TODO(finn): check for off by one
+    auto *const b_end = reinterpret_cast<block4_t *>(input_b + length_b);
+
+    auto *output_ptr = reinterpret_cast<block4_t *>(output);
+    auto *next = b_ptr;
+    auto output_lo = Vec<T>{};
+    auto output_hi = Vec<T>{};
+    auto a_loaded = load4<T>(reinterpret_cast<T *>(a_ptr));
+    auto b_loaded = load4<T>(reinterpret_cast<T *>(b_ptr));
+    ++a_ptr;
+    ++b_ptr;
+    bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
+    store4(output_lo, reinterpret_cast<uint64_t *>(output_ptr));
+    ++output_ptr;
+    // As long as both A and B are not empty, do fetch and 2x4 merge.
+    while (a_ptr < a_end && b_ptr < b_end) {
+      choose_next_and_update_pointers<block4_t, T>(next, a_ptr, b_ptr);
+      a_loaded = output_hi;
+      b_loaded = load4<T>(reinterpret_cast<T *>(next));
+      bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
+      store4(output_lo, reinterpret_cast<T *>(output_ptr));
+      ++output_ptr;
+    }
+
+    // If A not empty, merge remainder of A.
+    while (a_ptr < a_end) {
+      a_loaded = load4<T>(reinterpret_cast<T *>(a_ptr));
+      b_loaded = output_hi;
+      bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
+      store4(output_lo, reinterpret_cast<T *>(output_ptr));
+      ++a_ptr;
+      ++output_ptr;
+    }
+    // If A not empty, merge remainder of A.
+    while (b_ptr < b_end) {
+      a_loaded = output_hi;
+      b_loaded = load4<T>(reinterpret_cast<T *>(b_ptr));
+      bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
+      store4(output_lo, reinterpret_cast<T *>(output_ptr));
+      ++b_ptr;
+      ++output_ptr;
+    }
+    store4(output_hi, reinterpret_cast<T *>(output_ptr));
+  }
+}
+
+// Sorting network for 4x4 input.
+
 template <typename T> void sort4x4(T *data, T *output) {
   constexpr auto TYPE_SIZE = sizeof(T);
   constexpr auto BYTE_OFFSET = 256 / (TYPE_SIZE * TYPE_SIZE);
@@ -400,4 +468,23 @@ template <typename T> void sort4x4(T *data, T *output) {
   store4(row_1, output + 4);
   store4(row_2, output + 8);
   store4(row_3, output + 12);
+}
+
+template <typename T, int... indices>
+Vec<T> inline cmp_merge(Vec<T> in1, Vec<T> in2) {
+  // NOLINTBEGIN
+  auto min = __builtin_elementwise_min(in1, in2);
+  auto max = __builtin_elementwise_max(in1, in2);
+  // NOLINTEND
+  return __builtin_shufflevector(min, max, indices...);
+}
+
+template <typename T> Vec<T> inline sort_register(Vec<T> reg) {
+  reg = cmp_merge<T, 0, 5, 2, 7>(reg,
+                                 __builtin_shufflevector(reg, reg, 1, 0, 3, 2));
+  reg = cmp_merge<T, 0, 1, 6, 7>(reg,
+                                 __builtin_shufflevector(reg, reg, 3, 2, 1, 0));
+  reg = cmp_merge<T, 0, 5, 2, 7>(reg,
+                                 __builtin_shufflevector(reg, reg, 1, 0, 3, 2));
+  return reg;
 }
