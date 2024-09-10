@@ -1,7 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 
 constexpr auto L2_CACHE_SIZE = 256 * 1024;
 constexpr auto BLOCK_SIZE = L2_CACHE_SIZE / (2 * sizeof(uint64_t));
@@ -261,6 +263,10 @@ merge8_eqlen(T *const input_a, T *const input_b, T *const output,
 }
 
 template <typename T>
+inline void merge8_varlen(T *const input_a, T *const input_b, T *const output,
+                          const size_t a_length, const size_t b_length) {}
+
+template <typename T>
 inline void __attribute((always_inline))
 merge16_eqlen(T *const input_a, T *const input_b, T *const output,
               const size_t length) {
@@ -369,24 +375,26 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
 
 template <typename T>
 inline void __attribute((always_inline))
-merge4_varlen(T *const input_a, T *const input_b, T *const output,
-              const size_t length_a, const size_t length_b) {
+merge4_varlen(T *input_a, T *input_b, T *output, const size_t length_a,
+              const size_t length_b) {
   const auto length_a4 = length_a & ~0x3u;
   const auto length_b4 = length_b & ~0x3u;
 
   const auto a_index = size_t{0};
   const auto b_index = size_t{0};
 
-  auto &output_ptr = output;
+  auto a_i = size_t{0};
+  auto b_i = size_t{0};
+
+  auto &out = output;
 
   if (length_a4 > 4 && length_b4 > 4) {
     auto *a_ptr = reinterpret_cast<block4_t *>(input_a);
     auto *b_ptr = reinterpret_cast<block4_t *>(input_b);
-    auto *const a_end = reinterpret_cast<block4_t *>(
-        input_a + length_a); // TODO(finn): check for off by one
-    auto *const b_end = reinterpret_cast<block4_t *>(input_b + length_b);
+    auto *const a_end = reinterpret_cast<block4_t *>(input_a + length_a) - 1;
+    auto *const b_end = reinterpret_cast<block4_t *>(input_b + length_b) - 1;
 
-    auto *output_ptr = reinterpret_cast<block4_t *>(output);
+    auto *output_ptr = reinterpret_cast<block4_t *>(out);
     auto *next = b_ptr;
     auto output_lo = Vec<T>{};
     auto output_hi = Vec<T>{};
@@ -397,6 +405,7 @@ merge4_varlen(T *const input_a, T *const input_b, T *const output,
     bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
     store4(output_lo, reinterpret_cast<uint64_t *>(output_ptr));
     ++output_ptr;
+    auto it = 0;
     // As long as both A and B are not empty, do fetch and 2x4 merge.
     while (a_ptr < a_end && b_ptr < b_end) {
       choose_next_and_update_pointers<block4_t, T>(next, a_ptr, b_ptr);
@@ -406,26 +415,45 @@ merge4_varlen(T *const input_a, T *const input_b, T *const output,
       store4(output_lo, reinterpret_cast<T *>(output_ptr));
       ++output_ptr;
     }
+    if (output_hi[3] <= *reinterpret_cast<T *>(a_ptr)) {
+      --a_ptr;
+      store4(output_hi, reinterpret_cast<T *>(a_ptr));
+    } else {
+      --b_ptr;
+      store4(output_hi, reinterpret_cast<T *>(b_ptr));
+    }
 
-    // If A not empty, merge remainder of A.
-    while (a_ptr < a_end) {
-      a_loaded = load4<T>(reinterpret_cast<T *>(a_ptr));
-      b_loaded = output_hi;
-      bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
-      store4(output_lo, reinterpret_cast<T *>(output_ptr));
-      ++a_ptr;
-      ++output_ptr;
-    }
-    // If A not empty, merge remainder of A.
-    while (b_ptr < b_end) {
-      a_loaded = output_hi;
-      b_loaded = load4<T>(reinterpret_cast<T *>(b_ptr));
-      bitonic4_merge(a_loaded, b_loaded, output_lo, output_hi);
-      store4(output_lo, reinterpret_cast<T *>(output_ptr));
-      ++b_ptr;
-      ++output_ptr;
-    }
-    store4(output_hi, reinterpret_cast<T *>(output_ptr));
+    a_i = reinterpret_cast<T *>(a_ptr) - input_a;
+    b_i = reinterpret_cast<T *>(b_ptr) - input_b;
+
+    input_a = reinterpret_cast<T *>(a_ptr);
+    input_b = reinterpret_cast<T *>(b_ptr);
+    out = reinterpret_cast<T *>(output_ptr);
+  }
+  // Serial Merge.
+  while (a_i < length_a && b_i < length_b) {
+    auto *next = input_b;
+    const auto cmp = *input_a < *input_b;
+    const auto cmp_neg = !cmp;
+    a_i += cmp;
+    b_i += cmp_neg;
+    next = cmp ? input_a : input_b;
+    *out = *next;
+    ++out;
+    input_a += cmp;
+    input_b += cmp_neg;
+  }
+  while (a_i < length_a) {
+    *out = *input_a;
+    ++a_i;
+    out++;
+    ++input_a;
+  }
+  while (b_i < length_b) {
+    *out = *input_b;
+    ++b_i;
+    out++;
+    ++input_b;
   }
 }
 
@@ -487,4 +515,64 @@ template <typename T> Vec<T> inline sort_register(Vec<T> reg) {
   reg = cmp_merge<T, 0, 5, 2, 7>(reg,
                                  __builtin_shufflevector(reg, reg, 1, 0, 3, 2));
   return reg;
+}
+
+// https://stackoverflow.com/questions/35311711/whats-the-right-way-to-compute-integral-base-2-logarithms-at-compile-time
+constexpr size_t cilog2(uint64_t val) {
+  return (val != 0u) ? 1 + cilog2(val >> 1u) : -1;
+}
+
+template <typename T>
+inline void __attribute__((always_inline)) simd_sort_block(T *&input_ptr,
+                                                           T *&output_ptr) {
+  auto ptrs = std::array<T *, 2>{};
+  ptrs[0] = input_ptr;
+  ptrs[1] = output_ptr;
+  // Apply 4x4 Sorting network.
+  {
+    auto *inptr = reinterpret_cast<block16_t *>(ptrs[0]);
+    auto *const end = reinterpret_cast<block16_t *>(ptrs[0] + BLOCK_SIZE);
+    while (inptr < end) {
+      sort4x4(reinterpret_cast<T *>(inptr), reinterpret_cast<T *>(inptr));
+      ++inptr;
+    }
+  }
+  constexpr auto LOG_BLOCK_SIZE = cilog2(BLOCK_SIZE);
+  constexpr auto STOP_LEVEL = LOG_BLOCK_SIZE - 2;
+
+  auto merge_level = [&]<typename MergeKernel>(size_t level,
+                                               MergeKernel merge_kernel) {
+    auto ptr_index = level & 1u;
+    auto *input = ptrs[ptr_index];
+    auto *output = ptrs[ptr_index ^ 1u];
+    auto *const end = input + BLOCK_SIZE;
+
+    const auto input_length = 1u << level;         // = 2^level
+    const auto output_length = input_length << 1u; // = input_length x 2
+    while (input < end) {
+      merge_kernel(input, input + input_length, output, input_length);
+      input += output_length;
+      output += output_length;
+    }
+  };
+  merge_level(2, &merge4_eqlen<T>);
+  merge_level(3, &merge8_eqlen<T>);
+#pragma unroll
+  for (auto level = size_t{4}; level < STOP_LEVEL; ++level) {
+    merge_level(level, &merge16_eqlen<T>);
+  }
+
+  auto input_length = 1u << STOP_LEVEL;
+  auto ptr_index = STOP_LEVEL & 1u;
+  auto *input = ptrs[ptr_index];
+  auto *output = ptrs[ptr_index ^ 1u];
+
+  merge16_eqlen<T>(input, input + input_length, output, input_length);
+  merge16_eqlen<T>(input + 2 * input_length, input + 3 * input_length,
+                   output + 2 * input_length, input_length);
+  input_length <<= 1u;
+  // NOLINTNEXTLINE
+  merge16_eqlen<T>(output, output + input_length, input, input_length);
+  input_ptr = output;
+  output_ptr = input;
 }
