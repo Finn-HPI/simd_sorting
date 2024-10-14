@@ -123,6 +123,9 @@ int main() {
 
   auto output = create_aligned_vector<KeyType>(NUM_ITEMS, ALIGNMENT);
 
+  using VecType = VecBase<256, KeyType>;
+  std::cout << "vec size: " << sizeof(VecType) << std::endl;
+
   auto *input_ptr = data_simd.data();
   auto *output_ptr = output.data();
 
