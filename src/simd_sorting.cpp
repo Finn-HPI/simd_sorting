@@ -7,7 +7,23 @@
 #include <immintrin.h>
 #include <iostream>
 #include <random>
-#include <vector>
+
+template <typename T> struct aligned_allocater {
+  using value_type = T;
+
+  aligned_allocater(std::size_t alignment) : alignment_(alignment) {}
+  T *allocate(std::size_t n) {
+    void *ptr = std::aligned_alloc(alignment_, n * sizeof(T));
+    if (!ptr) {
+      throw std::bad_alloc();
+    }
+    return static_cast<T *>(ptr);
+  }
+  void deallocate(T *ptr, std::size_t) noexcept { std::free(ptr); }
+
+private:
+  std::size_t alignment_;
+};
 
 template <typename T> struct ChunkInfo {
   T *input;
@@ -20,6 +36,7 @@ void simd_sort(T *&input_ptr, T *&output_ptr, size_t element_count) {
   if (element_count <= 0) {
     return;
   }
+  std::cout << "check alignment" << std::endl;
   constexpr auto BLOCK_SIZE = block_size<T>();
   auto *input = input_ptr;
   auto *output = output_ptr;
@@ -74,11 +91,11 @@ void simd_sort(T *&input_ptr, T *&output_ptr, size_t element_count) {
   input_ptr = chunk_infos[0].output;
 }
 
-template <typename ElementType, int elements_per_register>
-void sort_elements(ElementType *& /*input*/, ElementType *& /*output*/,
-                   size_t /*num_elements*/) {
-  assert(false &&
-         "Sort is not available for the number of elements per register.");
+template <typename T>
+std::vector<T, aligned_allocater<T>> create_aligned_vector(size_t count,
+                                                           size_t alignment) {
+  return std::move(std::vector<T, aligned_allocater<T>>(
+      count, aligned_allocater<T>(alignment)));
 }
 
 int main() {
@@ -92,16 +109,17 @@ int main() {
   std::uniform_int_distribution<uint64_t> dis(
       0, std::numeric_limits<uint64_t>::max());
 
-  constexpr auto SCALE = 70;
-  constexpr auto NUM_ITEMS = SCALE * block_size<uint64_t>();
+  constexpr auto SCALE = 200;
+  constexpr auto ALIGNMENT = 32;
+  constexpr auto NUM_ITEMS = SCALE * 16384;
 
   std::cout << "num_items: " << NUM_ITEMS << std::endl;
 
-  alignas(32) auto data_simd = std::vector<uint64_t>(NUM_ITEMS);
-  alignas(32) auto data_sort = std::vector<uint64_t>(NUM_ITEMS);
-  alignas(32) auto data_qsort = std::vector<uint64_t>(NUM_ITEMS);
+  auto data_simd = create_aligned_vector<uint64_t>(NUM_ITEMS, ALIGNMENT);
+  auto data_sort = create_aligned_vector<uint64_t>(NUM_ITEMS, ALIGNMENT);
+  auto data_qsort = create_aligned_vector<uint64_t>(NUM_ITEMS, ALIGNMENT);
 
-  alignas(32) auto output = std::vector<uint64_t>(NUM_ITEMS);
+  auto output = create_aligned_vector<uint64_t>(NUM_ITEMS, ALIGNMENT);
 
   auto *input_ptr = data_simd.data();
   auto *output_ptr = output.data();
@@ -112,38 +130,49 @@ int main() {
     data_sort[index] = val;
     data_qsort[index] = val;
   }
+  if (!is_aligned(data_simd.data(), 32) || !is_aligned(output.data(), 32)) {
+    std::cerr << "Data or Output is not aligend";
+    return -1;
+  } else {
+    std::cout << "data is aligned" << std::endl;
+  }
 
-  auto start1 = high_resolution_clock::now();
-  std::qsort(data_qsort.data(), data_qsort.size(), sizeof(uint64_t),
-             [](const void *first, const void *second) {
-               const auto arg1 = *static_cast<const uint64_t *>(first);
-               const auto arg2 = *static_cast<const uint64_t *>(second);
-               return static_cast<int>(arg1 > arg2) -
-                      static_cast<int>(arg1 < arg2);
-             });
-  auto end1 = high_resolution_clock::now();
-  auto ms1 = duration_cast<milliseconds>(end1 - start1).count();
-  std::cout << "std::qsort took: " << ms1 << std::endl;
-
-  auto start2 = high_resolution_clock::now();
+  // auto start1 = high_resolution_clock::now();
+  // std::qsort(data_qsort.data(), data_qsort.size(), sizeof(uint64_t),
+  //            [](const void *first, const void *second) {
+  //              const auto arg1 = *static_cast<const uint64_t *>(first);
+  //              const auto arg2 = *static_cast<const uint64_t *>(second);
+  //              return static_cast<int>(arg1 > arg2) -
+  //                     static_cast<int>(arg1 < arg2);
+  //            });
+  // auto end1 = high_resolution_clock::now();
+  // auto ms1 = duration_cast<milliseconds>(end1 - start1).count();
+  // std::cout << "std::qsort took: " << ms1 << std::endl;
+  //
+  // auto start2 = high_resolution_clock::now();
   std::ranges::sort(data_sort);
-  auto end2 = high_resolution_clock::now();
-  auto ms2 = duration_cast<milliseconds>(end2 - start2).count();
-  std::cout << "std::sort took: " << ms2 << std::endl;
 
-  auto start3 = high_resolution_clock::now();
+  // auto end2 = high_resolution_clock::now();
+  // auto ms2 = duration_cast<milliseconds>(end2 - start2).count();
+  // std::cout << "std::sort took: " << ms2 << std::endl;
+  //
+  // auto start3 = high_resolution_clock::now();
+  // check_alignment(data_simd.data());
   simd_sort(input_ptr, output_ptr, NUM_ITEMS);
-  auto end3 = high_resolution_clock::now();
-  auto ms3 = duration_cast<milliseconds>(end3 - start3).count();
-  std::cout << "avxsort took: " << ms3 << std::endl;
-
-  auto baseline = (ms1 < ms2) ? ms1 : ms2;
-  auto simd_x = static_cast<double>(baseline) / static_cast<double>(ms3);
-  auto simd_improvement = (simd_x - 1.0) * 100;
-  std::cout << "SIMD sort performed " << simd_improvement << "% (x" << simd_x
-            << ") better compared to fastest baseline ("
-            << ((ms1 > ms2) ? "std::sort" : "std::qsort") << ")." << std::endl;
+  // auto end3 = high_resolution_clock::now();
+  // auto ms3 = duration_cast<milliseconds>(end3 - start3).count();
+  // std::cout << "avxsort took: " << ms3 << std::endl;
+  //
+  // auto baseline = (ms1 < ms2) ? ms1 : ms2;
+  // auto simd_x = static_cast<double>(baseline) / static_cast<double>(ms3);
+  // auto simd_improvement = (simd_x - 1.0) * 100;
+  // std::cout << "SIMD sort performed " << simd_improvement << "% (x" << simd_x
+  //           << ") better compared to fastest baseline ("
+  //           << ((ms1 > ms2) ? "std::sort" : "std::qsort") << ")." <<
+  //           std::endl;
   auto &sorted_data = (output_ptr == output.data()) ? output : data_simd;
+  std::cout << "is sorted: " << std::ranges::is_sorted(sorted_data)
+            << std::endl;
   assert(std::ranges::is_sorted(sorted_data));
   assert(sorted_data == data_sort);
   return 0;

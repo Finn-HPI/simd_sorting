@@ -11,8 +11,8 @@ template <typename T> constexpr size_t block_size() {
   return L2_CACHE_SIZE / (2 * sizeof(T));
 }
 
-#define LOWER_HAVES 0, 1, 4, 5
-#define UPPER_HAVES 2, 3, 6, 7
+#define LOWER_HALVES 0, 1, 4, 5
+#define UPPER_HALVES 2, 3, 6, 7
 #define INTERLEAVE_LOWERS 0, 4, 1, 5
 #define INTERLEAVE_UPPERS 2, 6, 3, 7
 
@@ -25,18 +25,27 @@ using block4_t = struct alignas(32) {};
 using block8_t = struct alignas(64) {};
 using block16_t = struct alignas(128) {};
 
+template <typename T>
+inline __attribute((always_inline)) bool is_aligned(T *addr,
+                                                    size_t byte_alignment) {
+  if (reinterpret_cast<std::uintptr_t>(addr) % byte_alignment == 0) {
+    return true;
+  }
+  return false;
+}
+
 // Loading and Storing SIMD registers.
 
 template <size_t reg_width, typename T>
 inline __attribute((always_inline)) VecBase<reg_width, T> load_vec4(T *addr) {
-  return {addr[0], addr[1], addr[2], addr[3]};
+  return *reinterpret_cast<VecBase<reg_width, T> *>(addr);
 }
 
 template <typename T, typename VectorType>
 inline void __attribute((always_inline)) store_vec4(VectorType data,
                                                     T *__restrict output) {
-  using UnalignedVec __attribute__((aligned(1))) = VectorType;
-  auto *out_vec = reinterpret_cast<UnalignedVec *>(output);
+  // using UnalignedVec __attribute__((aligned(1))) = VectorType;
+  auto *out_vec = reinterpret_cast<VectorType *>(output);
   *out_vec = data;
 }
 
@@ -76,13 +85,13 @@ template <typename T> inline void reverse4(Vec<T> &vec) {
 }
 
 template <typename T>
-inline void bitonic4(Vec<T> in1, Vec<T> in2, Vec<T> &out1, Vec<T> &out2) {
-  // NOLINTBEGIN
+inline void bitonic4(Vec<T> input_a, Vec<T> input_b, Vec<T> &out1,
+                     Vec<T> &out2) {
   // Level 1
-  auto lo1 = __builtin_elementwise_min(in1, in2);
-  auto hi1 = __builtin_elementwise_max(in1, in2);
-  auto lo1_perm = __builtin_shufflevector(lo1, hi1, 0, 1, 4, 5);
-  auto hi1_perm = __builtin_shufflevector(lo1, hi1, 2, 3, 6, 7);
+  auto lo1 = __builtin_elementwise_min(input_a, input_b);
+  auto hi1 = __builtin_elementwise_max(input_a, input_b);
+  auto lo1_perm = __builtin_shufflevector(lo1, hi1, LOWER_HALVES);
+  auto hi1_perm = __builtin_shufflevector(lo1, hi1, UPPER_HALVES);
   // Level 2
   auto lo2 = __builtin_elementwise_min(lo1_perm, hi1_perm);
   auto hi2 = __builtin_elementwise_max(lo1_perm, hi1_perm);
@@ -93,7 +102,6 @@ inline void bitonic4(Vec<T> in1, Vec<T> in2, Vec<T> &out1, Vec<T> &out2) {
   auto hi3 = __builtin_elementwise_max(lo2_perm, hi2_perm);
   out1 = __builtin_shufflevector(lo3, hi3, 0, 4, 1, 5);
   out2 = __builtin_shufflevector(lo3, hi3, 2, 6, 3, 7);
-  // NOLINTEND
 }
 
 template <typename T>
@@ -301,25 +309,10 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
   auto *output_ptr = reinterpret_cast<block16_t *>(output);
   auto *next = b_ptr;
 
-  auto reg_out1l1 = Vec<T>{};
-  auto reg_out1l2 = Vec<T>{};
-  auto reg_out1h1 = Vec<T>{};
-  auto reg_out1h2 = Vec<T>{};
+  Vec<T> reg_out1l1, reg_out1l2, reg_out1h1, reg_out1h2, reg_out2l1, reg_out2l2,
+      reg_out2h1, reg_out2h2;
 
-  auto reg_out2l1 = Vec<T>{};
-  auto reg_out2l2 = Vec<T>{};
-  auto reg_out2h1 = Vec<T>{};
-  auto reg_out2h2 = Vec<T>{};
-
-  auto reg_al1 = Vec<T>{};
-  auto reg_al2 = Vec<T>{};
-  auto reg_ah1 = Vec<T>{};
-  auto reg_ah2 = Vec<T>{};
-
-  auto reg_bl1 = Vec<T>{};
-  auto reg_bl2 = Vec<T>{};
-  auto reg_bh1 = Vec<T>{};
-  auto reg_bh2 = Vec<T>{};
+  Vec<T> reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2, reg_bh1, reg_bh2;
 
   load8(reg_al1, reg_al2, a_ptr);
   load8(reg_ah1, reg_ah2, reinterpret_cast<block8_t *>(a_ptr) + 1);
@@ -385,7 +378,7 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
                     reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
     store8(reg_out1l1, reg_out1l2, output_ptr);
     store8(reg_out1h1, reg_out1h2,
-           reinterpret_cast<block4_t *>(output_ptr) + 2);
+           reinterpret_cast<half_block_t *>(output_ptr) + 2);
     ++output_ptr;
   }
 
@@ -486,6 +479,15 @@ template <size_t elements_per_register, typename T> struct SimdSort {
   };
 };
 
+template <typename VecType>
+static inline void __attribute__((always_inline))
+compare_min_max(VecType &input1, VecType &input2) {
+  auto min = __builtin_elementwise_min(input1, input2);
+  auto max = __builtin_elementwise_max(input1, input2);
+  input1 = min;
+  input2 = max;
+}
+
 template <typename T> struct SimdSort<4, T> {
   static inline void __attribute__((always_inline)) sort(T *data, T *output) {
     constexpr auto REGISTER_WIDTH = 4 * sizeof(T);
@@ -494,30 +496,33 @@ template <typename T> struct SimdSort<4, T> {
     auto row_2 = load_vec4<REGISTER_WIDTH>(data + 8);
     auto row_3 = load_vec4<REGISTER_WIDTH>(data + 12);
 
-    // NOLINTBEGIN
-    auto temp_a = __builtin_elementwise_min(row_0, row_2);
-    auto temp_b = __builtin_elementwise_max(row_0, row_2);
-    auto temp_c = __builtin_elementwise_min(row_1, row_3);
-    auto temp_d = __builtin_elementwise_max(row_1, row_3);
-    auto temp_e = __builtin_elementwise_max(temp_a, temp_c);
-    auto temp_f = __builtin_elementwise_min(temp_b, temp_d);
-    row_0 = __builtin_elementwise_min(temp_a, temp_c);
-    row_1 = __builtin_elementwise_min(temp_e, temp_f);
-    row_2 = __builtin_elementwise_max(temp_e, temp_f);
-    row_3 = __builtin_elementwise_max(temp_b, temp_d);
-    // NOLINTEND
+    // Level 1 comparisons.
+    compare_min_max(row_0, row_2);
+    compare_min_max(row_1, row_3);
+    // Level 2 comparisons.
+    compare_min_max(row_0, row_1);
+    compare_min_max(row_2, row_3);
+    // Level 3 comparisons.
+    compare_min_max(row_1, row_2);
 
     // Transpose Matrix
-    auto ab_lo = __builtin_shufflevector(row_0, row_1, INTERLEAVE_LOWERS);
-    auto ab_hi = __builtin_shufflevector(row_0, row_1, INTERLEAVE_UPPERS);
-    auto cd_lo = __builtin_shufflevector(row_2, row_3, INTERLEAVE_LOWERS);
-    auto cd_hi = __builtin_shufflevector(row_2, row_3, INTERLEAVE_UPPERS);
+    auto ab_interleaved_lower_halves =
+        __builtin_shufflevector(row_0, row_1, INTERLEAVE_LOWERS);
+    auto ab_interleaved_upper_halves =
+        __builtin_shufflevector(row_0, row_1, INTERLEAVE_UPPERS);
+    auto cd_interleaved_lower_halves =
+        __builtin_shufflevector(row_2, row_3, INTERLEAVE_LOWERS);
+    auto cd_interleaved_upper_halves =
+        __builtin_shufflevector(row_2, row_3, INTERLEAVE_UPPERS);
 
-    row_0 = __builtin_shufflevector(ab_lo, cd_lo, LOWER_HAVES);
-    row_1 = __builtin_shufflevector(ab_lo, cd_lo, UPPER_HAVES);
-    row_2 = __builtin_shufflevector(ab_hi, cd_hi, LOWER_HAVES);
-    row_3 = __builtin_shufflevector(ab_hi, cd_hi, UPPER_HAVES);
-
+    row_0 = __builtin_shufflevector(ab_interleaved_lower_halves,
+                                    cd_interleaved_lower_halves, LOWER_HALVES);
+    row_1 = __builtin_shufflevector(ab_interleaved_lower_halves,
+                                    cd_interleaved_lower_halves, UPPER_HALVES);
+    row_2 = __builtin_shufflevector(ab_interleaved_upper_halves,
+                                    cd_interleaved_upper_halves, LOWER_HALVES);
+    row_3 = __builtin_shufflevector(ab_interleaved_upper_halves,
+                                    cd_interleaved_upper_halves, UPPER_HALVES);
     // Write to output
     store_vec4(row_0, output);
     store_vec4(row_1, output + 4);
