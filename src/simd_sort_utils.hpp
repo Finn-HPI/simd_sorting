@@ -21,9 +21,9 @@ using VecBase __attribute__((vector_size(reg_size))) = T;
 
 template <typename T> using Vec = VecBase<32, T>;
 
-using block4_t = struct alignas(32) {};
-using block8_t = struct alignas(64) {};
-using block16_t = struct alignas(128) {};
+// using block4_t = struct alignas(32) {};
+// using block8_t = struct alignas(64) {};
+// using block16_t = struct alignas(128) {};
 
 template <typename T>
 inline __attribute((always_inline)) bool is_aligned(T *addr,
@@ -299,14 +299,14 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
               const size_t length) {
 
   using block_t = struct alignas(16 * sizeof(T)) {};
-  using half_block_t = struct alignas(4 * sizeof(T)) {};
+  using half_block_t = struct alignas(8 * sizeof(T)) {};
 
-  auto *a_ptr = reinterpret_cast<block16_t *>(input_a);
-  auto *b_ptr = reinterpret_cast<block16_t *>(input_b);
-  auto *const a_end = reinterpret_cast<block16_t *>(input_a + length);
-  auto *const b_end = reinterpret_cast<block16_t *>(input_b + length);
+  auto *a_ptr = reinterpret_cast<block_t *>(input_a);
+  auto *b_ptr = reinterpret_cast<block_t *>(input_b);
+  auto *const a_end = reinterpret_cast<block_t *>(input_a + length);
+  auto *const b_end = reinterpret_cast<block_t *>(input_b + length);
 
-  auto *output_ptr = reinterpret_cast<block16_t *>(output);
+  auto *output_ptr = reinterpret_cast<block_t *>(output);
   auto *next = b_ptr;
 
   Vec<T> reg_out1l1, reg_out1l2, reg_out1h1, reg_out1h2, reg_out2l1, reg_out2l2,
@@ -315,36 +315,37 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
   Vec<T> reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2, reg_bh1, reg_bh2;
 
   load8(reg_al1, reg_al2, a_ptr);
-  load8(reg_ah1, reg_ah2, reinterpret_cast<block8_t *>(a_ptr) + 1);
+  load8(reg_ah1, reg_ah2, reinterpret_cast<half_block_t *>(a_ptr) + 1);
   ++a_ptr;
 
   load8(reg_bl1, reg_bl2, b_ptr);
-  load8(reg_bh1, reg_bh2, reinterpret_cast<block8_t *>(b_ptr) + 1);
+  load8(reg_bh1, reg_bh2, reinterpret_cast<half_block_t *>(b_ptr) + 1);
   ++b_ptr;
 
   bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2, reg_bh1,
                   reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1, reg_out1h2,
                   reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
 
-  store8(reg_out1l1, reg_out1l2, reinterpret_cast<block8_t *>(output_ptr));
-  store8(reg_out1h1, reg_out1h2, reinterpret_cast<block8_t *>(output_ptr) + 1);
+  store8(reg_out1l1, reg_out1l2, reinterpret_cast<half_block_t *>(output_ptr));
+  store8(reg_out1h1, reg_out1h2,
+         reinterpret_cast<half_block_t *>(output_ptr) + 1);
   ++output_ptr;
 
   while (a_ptr < a_end && b_ptr < b_end) {
-    choose_next_and_update_pointers<block16_t, T>(next, a_ptr, b_ptr);
+    choose_next_and_update_pointers<block_t, T>(next, a_ptr, b_ptr);
     reg_al1 = reg_out2l1;
     reg_al2 = reg_out2l2;
     reg_ah1 = reg_out2h1;
     reg_ah2 = reg_out2h2;
-    load8(reg_bl1, reg_bl2, reinterpret_cast<block8_t *>(next));
-    load8(reg_bh1, reg_bh2, reinterpret_cast<block8_t *>(next) + 1);
+    load8(reg_bl1, reg_bl2, reinterpret_cast<half_block_t *>(next));
+    load8(reg_bh1, reg_bh2, reinterpret_cast<half_block_t *>(next) + 1);
 
     bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
                     reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
                     reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
     store8(reg_out1l1, reg_out1l2, output_ptr);
     store8(reg_out1h1, reg_out1h2,
-           reinterpret_cast<block8_t *>(output_ptr) + 1);
+           reinterpret_cast<half_block_t *>(output_ptr) + 1);
     ++output_ptr;
   }
 
@@ -353,15 +354,15 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
     reg_bl2 = reg_out2l2;
     reg_bh1 = reg_out2h1;
     reg_bh2 = reg_out2h2;
-    load8(reg_al1, reg_al2, reinterpret_cast<block8_t *>(a_ptr));
-    load8(reg_ah1, reg_ah2, reinterpret_cast<block8_t *>(a_ptr) + 1);
+    load8(reg_al1, reg_al2, reinterpret_cast<half_block_t *>(a_ptr));
+    load8(reg_ah1, reg_ah2, reinterpret_cast<half_block_t *>(a_ptr) + 1);
     ++a_ptr;
     bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
                     reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
                     reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
     store8(reg_out1l1, reg_out1l2, output_ptr);
     store8(reg_out1h1, reg_out1h2,
-           reinterpret_cast<block8_t *>(output_ptr) + 1);
+           reinterpret_cast<half_block_t *>(output_ptr) + 1);
     ++output_ptr;
   }
 
@@ -370,20 +371,21 @@ merge16_eqlen(T *const input_a, T *const input_b, T *const output,
     reg_al2 = reg_out2l2;
     reg_ah1 = reg_out2h1;
     reg_ah2 = reg_out2h2;
-    load8(reg_bl1, reg_bl2, reinterpret_cast<block8_t *>(b_ptr));
-    load8(reg_bh1, reg_bh2, reinterpret_cast<block8_t *>(b_ptr) + 1);
+    load8(reg_bl1, reg_bl2, reinterpret_cast<half_block_t *>(b_ptr));
+    load8(reg_bh1, reg_bh2, reinterpret_cast<half_block_t *>(b_ptr) + 1);
     ++b_ptr;
     bitonic16_merge(reg_al1, reg_al2, reg_ah1, reg_ah2, reg_bl1, reg_bl2,
                     reg_bh1, reg_bh2, reg_out1l1, reg_out1l2, reg_out1h1,
                     reg_out1h2, reg_out2l1, reg_out2l2, reg_out2h1, reg_out2h2);
     store8(reg_out1l1, reg_out1l2, output_ptr);
     store8(reg_out1h1, reg_out1h2,
-           reinterpret_cast<half_block_t *>(output_ptr) + 2);
+           reinterpret_cast<half_block_t *>(output_ptr) + 1);
     ++output_ptr;
   }
 
   store8(reg_out2l1, reg_out2l2, output_ptr);
-  store8(reg_out2h1, reg_out2h2, reinterpret_cast<block8_t *>(output_ptr) + 1);
+  store8(reg_out2h1, reg_out2h2,
+         reinterpret_cast<half_block_t *>(output_ptr) + 1);
 }
 
 // Bitonic merge algorithms for variable sized A and B.
@@ -392,6 +394,7 @@ template <typename T>
 inline void __attribute((always_inline))
 merge4_varlen(T *input_a, T *input_b, T *output, const size_t length_a,
               const size_t length_b) {
+  using block4_t = struct alignas(4 * sizeof(T)) {};
   const auto length_a4 = length_a & ~0x3u;
   const auto length_b4 = length_b & ~0x3u;
 
@@ -472,7 +475,7 @@ merge4_varlen(T *input_a, T *input_b, T *output, const size_t length_a,
   }
 }
 
-template <size_t elements_per_register, typename T> struct SimdSort {
+template <size_t elements_per_register, typename T> struct SortingNetwork {
   static inline void __attribute__((always_inline)) sort(T * /*data*/,
                                                          T * /*output*/) {
     assert(false && "Not implemented.");
@@ -488,7 +491,7 @@ compare_min_max(VecType &input1, VecType &input2) {
   input2 = max;
 }
 
-template <typename T> struct SimdSort<4, T> {
+template <typename T> struct SortingNetwork<4, T> {
   static inline void __attribute__((always_inline)) sort(T *data, T *output) {
     constexpr auto REGISTER_WIDTH = 4 * sizeof(T);
     auto row_0 = load_vec4<REGISTER_WIDTH>(data);
@@ -536,24 +539,24 @@ template <typename T> constexpr size_t cilog2(T val) {
   return (val != 0u) ? 1 + cilog2(val >> 1u) : -1;
 }
 
-template <size_t register_width, typename T>
-inline void __attribute__((always_inline)) simd_sort_chunk(T *&input_ptr,
+template <size_t count_per_register, typename T>
+inline void __attribute__((always_inline)) simd_sort_block(T *&input_ptr,
                                                            T *&output_ptr) {
   constexpr auto BLOCK_SIZE = block_size<T>();
   auto ptrs = std::array<T *, 2>{};
   ptrs[0] = input_ptr;
   ptrs[1] = output_ptr;
   {
-    constexpr auto COUNT_PER_REGISTER = register_width / (8 * sizeof(T));
     using block_t =
-        struct alignas(sizeof(T) * COUNT_PER_REGISTER * COUNT_PER_REGISTER) {};
-    auto *inptr = reinterpret_cast<block_t *>(ptrs[0]);
-    auto *const end = reinterpret_cast<block_t *>(ptrs[0] + BLOCK_SIZE);
-    using SortingNetwork = SimdSort<COUNT_PER_REGISTER, T>;
-    while (inptr < end) {
-      SortingNetwork::sort(reinterpret_cast<T *>(inptr),
-                           reinterpret_cast<T *>(inptr));
-      ++inptr;
+        struct alignas(sizeof(T) * count_per_register * count_per_register) {};
+    auto *block_start_address = reinterpret_cast<block_t *>(ptrs[0]);
+    auto *const block_end_address =
+        reinterpret_cast<block_t *>(ptrs[0] + BLOCK_SIZE);
+    using SortingNetwork = SortingNetwork<count_per_register, T>;
+    while (block_start_address < block_end_address) {
+      SortingNetwork::sort(reinterpret_cast<T *>(block_start_address),
+                           reinterpret_cast<T *>(block_start_address));
+      ++block_start_address;
     }
   }
   constexpr auto LOG_BLOCK_SIZE = cilog2(BLOCK_SIZE);
