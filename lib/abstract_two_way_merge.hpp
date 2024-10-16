@@ -1,7 +1,7 @@
 #pragma once
 #include <cstddef>
 
-#include "simd_basics.hpp"
+#include "simd_utils.hpp"
 
 template <size_t count_per_register, typename T, typename Derived>
 class AbstractTwoWayMerge {

@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <vector>
 
-#include "simd_basics.hpp"
+#include "simd_utils.hpp"
 #include "two_way_merge.hpp"
 
 template <typename VecType>
@@ -20,7 +20,7 @@ static inline void __attribute__((always_inline)) compare_min_max(VecType& input
 template <size_t elements_per_register, typename T>
 struct SortingNetwork {
   static inline void __attribute__((always_inline)) sort(T* /*data*/, T* /*output*/) {
-    assert(false && "Not implemented.");
+    static_assert(false, "Not implemented.");
   };
 };
 

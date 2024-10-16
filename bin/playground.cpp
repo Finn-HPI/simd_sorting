@@ -68,6 +68,51 @@ void benchmark(size_t num_items) {
   if (!is_aligned(data_simd.data(), 32) || !is_aligned(output.data(), 32)) {
     assert(false && "Data or Output is not aligend");
   }
+
+  // ========== Measure std::qsort ================================
+
+  auto start1 = high_resolution_clock::now();
+  std::qsort(data_qsort.data(), data_qsort.size(), sizeof(KeyType), [](const void* first, const void* second) {
+    const auto arg1 = *static_cast<const KeyType*>(first);
+    const auto arg2 = *static_cast<const KeyType*>(second);
+    return static_cast<int>(arg1 > arg2) - static_cast<int>(arg1 < arg2);
+  });
+  auto end1 = high_resolution_clock::now();
+  auto ms1 = duration_cast<milliseconds>(end1 - start1).count();
+  std::cout << "qsort: " << ms1 << std::endl;
+
+  // ========== Measure std::ranges::sort ========================
+
+  auto start2 = high_resolution_clock::now();
+  std::ranges::sort(data_sort);
+  auto end2 = high_resolution_clock::now();
+  auto ms2 = duration_cast<milliseconds>(end2 - start2).count();
+  std::cout << "sort: " << ms2 << std::endl;
+
+  // ========== Measure simd_sort ================================
+
+  auto start3 = high_resolution_clock::now();
+  simd_sort<count_per_register>(input_ptr, output_ptr, num_items);
+  auto end3 = high_resolution_clock::now();
+  auto ms3 = duration_cast<milliseconds>(end3 - start3).count();
+
+  std::cout << "simd_sort: " << ms3 << std::endl;
+
+  // ========= Evaluation ========================================
+
+  auto simd_improvement_qsort = static_cast<double>(ms1) / static_cast<double>(ms3);
+  auto simd_improvement_sort = static_cast<double>(ms2) / static_cast<double>(ms3);
+
+  std::cout << "simd_sort is " << (simd_improvement_qsort - 1) * 100 << "% " << "faster than std::qsort (x"
+            << simd_improvement_qsort << ")." << std::endl;
+  std::cout << "simd_sort is " << (simd_improvement_sort - 1) * 100 << "% " << "faster than std::sort (x"
+            << simd_improvement_sort << ")." << std::endl;
+
+  auto& sorted_data = (output_ptr == output.data()) ? output : data_simd;
+  assert(std::ranges::is_sorted(sorted_data));
+  assert(sorted_data == data_sort);
+  std::cout << "output is sorted = " << std::ranges::is_sorted(sorted_data)
+            << " and is same as std::sort = " << (sorted_data == data_sort) << std::endl;
 }
 
 int main(int argc, char* argv[]) {

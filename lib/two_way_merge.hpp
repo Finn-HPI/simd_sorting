@@ -1,8 +1,7 @@
 #pragma once
-#include <cassert>
 
 #include "abstract_two_way_merge.hpp"
-#include "simd_basics.hpp"
+#include "simd_utils.hpp"
 
 template <size_t count_per_register, typename T>
 class TwoWayMerge : public AbstractTwoWayMerge<count_per_register, T, TwoWayMerge<count_per_register, T>> {
@@ -22,7 +21,7 @@ class TwoWayMerge<2, T> : public AbstractTwoWayMerge<2, T, TwoWayMerge<2, T>> {
   struct BitonicMergeNetwork {
     static inline void __attribute__((always_inline)) merge(MulitVecType& /*in1*/, MulitVecType& /*in2*/,
                                                             MulitVecType& /*out1*/, MulitVecType& /*out2*/) {
-      assert(false && "Not implemented.");
+      static_assert(false, "Not implemented.");
     }
   };
 
@@ -114,7 +113,7 @@ class TwoWayMerge<4, T> : public AbstractTwoWayMerge<4, T, TwoWayMerge<4, T>> {
   struct BitonicMergeNetwork {
     static inline void __attribute__((always_inline)) merge(MulitVecType& /*in1*/, MulitVecType& /*in2*/,
                                                             MulitVecType& /*out1*/, MulitVecType& /*out2*/) {
-      assert(false && "Not implemented.");
+      static_assert(false, "Not implemented.");
     }
   };
 
