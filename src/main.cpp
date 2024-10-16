@@ -7,7 +7,9 @@
 #include <iostream>
 #include <random>
 
-#include "simd_sort_utils.hpp"
+#include "cxxopts.hpp"
+
+#include "simd_local_sort.hpp"
 
 template <typename T>
 struct AlignedAllocater {
@@ -37,36 +39,28 @@ std::vector<T, AlignedAllocater<T>> create_aligned_vector(size_t count, size_t a
   return std::move(std::vector<T, AlignedAllocater<T>>(count, AlignedAllocater<T>(alignment)));
 }
 
-int main() {
+template <size_t count_per_register, typename KeyType>
+void benchmark(size_t num_items) {
   using std::chrono::duration;
   using std::chrono::duration_cast;
   using std::chrono::high_resolution_clock;
   using std::chrono::milliseconds;
-  using KeyType = double;
 
   std::random_device rnd;
   std::mt19937 gen(rnd());
   std::uniform_real_distribution<KeyType> dis(0, std::numeric_limits<KeyType>::max());
-
-  constexpr auto SCALE = 200;
   constexpr auto ALIGNMENT = 32;
-  constexpr auto NUM_ITEMS = SCALE * block_size<KeyType>();  //+ block_size<KeyType>() / 2;
-  constexpr auto COUNT_PER_REGISTER = 4;                     // 64-bit elements with AVX2.
 
-  std::cout << "num_items: " << NUM_ITEMS << std::endl;
+  auto data_simd = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
+  auto data_sort = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
+  auto data_qsort = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
 
-  auto data_simd = create_aligned_vector<KeyType>(NUM_ITEMS, ALIGNMENT);
-  auto data_sort = create_aligned_vector<KeyType>(NUM_ITEMS, ALIGNMENT);
-  auto data_qsort = create_aligned_vector<KeyType>(NUM_ITEMS, ALIGNMENT);
-
-  auto output = create_aligned_vector<KeyType>(NUM_ITEMS, ALIGNMENT);
-
-  using VecType = Vec<256, KeyType>;
+  auto output = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
 
   auto* input_ptr = data_simd.data();
   auto* output_ptr = output.data();
 
-  for (auto index = size_t{0}; index < NUM_ITEMS; ++index) {
+  for (auto index = size_t{0}; index < num_items; ++index) {
     const auto val = dis(gen);
     data_simd[index] = val;
     data_sort[index] = val;
@@ -74,8 +68,7 @@ int main() {
   }
 
   if (!is_aligned(data_simd.data(), 32) || !is_aligned(output.data(), 32)) {
-    std::cerr << "Data or Output is not aligend";
-    return -1;
+    assert(false && "Data or Output is not aligend");
   }
 
   // ========== Measure std::qsort ================================
@@ -101,13 +94,9 @@ int main() {
   // ========== Measure simd_sort ================================
 
   auto start3 = high_resolution_clock::now();
-  simd_sort<COUNT_PER_REGISTER>(input_ptr, output_ptr, NUM_ITEMS);
+  simd_sort<count_per_register>(input_ptr, output_ptr, num_items);
   auto end3 = high_resolution_clock::now();
   auto ms3 = duration_cast<milliseconds>(end3 - start3).count();
-
-  auto& sorted_data = (output_ptr == output.data()) ? output : data_simd;
-  assert(std::ranges::is_sorted(sorted_data));
-  assert(sorted_data == data_sort);
 
   std::cout << "simd_sort: " << ms3 << std::endl;
 
@@ -120,6 +109,43 @@ int main() {
             << simd_improvement_qsort << ")." << std::endl;
   std::cout << "simd_sort is " << (simd_improvement_sort - 1) * 100 << "% " << "faster than std::sort (x"
             << simd_improvement_sort << ")." << std::endl;
+
+  auto& sorted_data = (output_ptr == output.data()) ? output : data_simd;
+  assert(std::ranges::is_sorted(sorted_data));
+  assert(sorted_data == data_sort);
+  std::cout << "output is sorted = " << std::ranges::is_sorted(sorted_data)
+            << " and is same as std::sort = " << (sorted_data == data_sort) << std::endl;
+}
+
+int main(int argc, char* argv[]) {
+  using KeyType = double;
+  cxxopts::Options options("SIMDSort", "A single-threaded simd_sort benchmark.");
+  // clang-format off
+  options.add_options()
+  ("c,cpr", "element count per simd register", cxxopts::value<size_t>()) 
+  ("s,scale", "num_items = scale * cache_block_size", cxxopts::value<size_t>()->default_value("200"))
+  ("h,help", "Print usage")
+  ;
+  // clang-format on
+  auto result = options.parse(argc, argv);
+  if (result.count("help") != 0u) {
+    std::cout << options.help() << std::endl;
+    return 0;
+  }
+
+  const auto scale = result["scale"].as<size_t>();
+  const auto num_items = scale * block_size<KeyType>();        // block_size<KeyType>() / 2;
+  const auto count_per_register = result["cpr"].as<size_t>();  // 64-bit elements with AVX2.
+
+  std::cout << "Scale: " << scale << " cpr: " << count_per_register << "num_items: " << num_items << std::endl;
+
+  if (count_per_register == 4) {
+    benchmark<4, KeyType>(num_items);
+  } else if (count_per_register == 2) {
+    benchmark<2, KeyType>(num_items);
+  } else {
+    assert(false && "benchmark not implemented");
+  }
 
   return 0;
 }

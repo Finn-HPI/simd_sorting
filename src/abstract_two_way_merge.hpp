@@ -5,15 +5,15 @@
 
 template <size_t count_per_register, typename T, typename Derived>
 class AbstractTwoWayMerge {
-  static constexpr auto REGISTER_WIDTH = count_per_register * sizeof(T);
-  using VecType = Vec<REGISTER_WIDTH, T>;
+  static constexpr auto REGISTER_SIZE = count_per_register * sizeof(T);
+  using VecType = Vec<REGISTER_SIZE, T>;
 
  protected:
   template <size_t kernel_size, typename MulitVecType>
   struct BitonicMergeNetwork {
-    static inline void merge(MulitVecType& /*in1*/, MulitVecType& /*in2*/, MulitVecType& /*out1*/,
-                             MulitVecType& /*out2*/) {
-      assert(false && "Not implemented.");
+    static inline void __attribute__((always_inline)) merge(MulitVecType& /*in1*/, MulitVecType& /*in2*/,
+                                                            MulitVecType& /*out1*/, MulitVecType& /*out2*/) {
+      static_assert(false, "Not implemented.");
     }
   };
 

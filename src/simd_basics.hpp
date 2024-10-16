@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 
@@ -51,20 +50,20 @@ template <size_t register_count, size_t elements_per_register, typename VecType>
 struct MultiVec {
   template <typename T>
   inline void __attribute__((always_inline)) load(T* /*address*/) {
-    assert(false && "Not implemented.");
+    static_assert(false, "Not implemented.");
   }
 
   template <typename T>
   inline void __attribute__((always_inline)) store(T* /*address*/) {
-    assert(false && "Not implemented.");
+    static_assert(false, "Not implemented.");
   }
 
   inline VecType& __attribute__((always_inline)) first() {
-    assert(false && "Not implemented.");
+    static_assert(false, "Not implemented.");
   }
 
   inline VecType& __attribute__((always_inline)) last() {
-    assert(false && "Not implemented.");
+    static_assert(false, "Not implemented.");
   }
 };
 
