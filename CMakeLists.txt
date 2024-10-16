@@ -8,18 +8,29 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
 
-# Define the source and header directories
-set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
-set(INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
+# Set default L2 Cache size to 256 KiB (262144 bytes)
+set(L2_CACHE_SIZE 262144 CACHE STRING "Local L2 Cache Size in bytes")
+# Define the L2_CACHE_SIZE macro
+add_definitions(-DL2_CACHE_SIZE=${L2_CACHE_SIZE})
 
-# Add the source files
-file(GLOB_RECURSE SRC_FILES ${SRC_DIR}/*.cpp)
+# Define the source directories
+set(LIB_DIR ${CMAKE_SOURCE_DIR}/lib)
+set(BIN_DIR ${CMAKE_SOURCE_DIR}/bin)
 
-# Add an executable
-add_executable(${PROJECT_NAME} ${SRC_FILES})
+# Include directories for the library
+add_library(simd_sorting_lib INTERFACE)
+target_include_directories(simd_sorting_lib INTERFACE ${LIB_DIR})
 
-# Include directories
-target_include_directories(${PROJECT_NAME} PRIVATE ${INCLUDE_DIR})
+# Get all .cpp files in the bin directory
+file(GLOB_RECURSE BIN_SOURCES ${BIN_DIR}/*.cpp)
 
-target_compile_options(${PROJECT_NAME} PRIVATE -mmmx -msse -msse2 -msse3 -mssse3 -msse4 -msse4a -msse4.1 -msse4.2 -mavx -mavx2) # -mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512vnni)
+# Create executables for each .cpp file found in the bin directory
+foreach(SOURCE ${BIN_SOURCES})
+    # Get the filename without the directory
+    get_filename_component(EXEC_NAME ${SOURCE} NAME_WE)
+    add_executable(${EXEC_NAME} ${SOURCE})
+    
+    # Link each executable to the simd_sorting_lib
+    target_link_libraries(${EXEC_NAME} PRIVATE simd_sorting_lib)
+endforeach()
 

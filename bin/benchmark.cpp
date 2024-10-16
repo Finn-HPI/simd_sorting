@@ -135,7 +135,9 @@ int main(int argc, char* argv[]) {
   const auto num_items = scale * block_size<KeyType>();        // block_size<KeyType>() / 2;
   const auto count_per_register = result["cpr"].as<size_t>();  // 64-bit elements with AVX2.
 
-  std::cout << "Scale: " << scale << " cpr: " << count_per_register << "num_items: " << num_items << std::endl;
+  std::cout << "[Configuration] scale: " << scale << ", cpr: " << count_per_register << ", num_items: " << num_items
+            << std::endl;
+  std::cout << "L2_CACHE_SIZE: " << L2_CACHE_SIZE << std::endl;
 
   if (count_per_register == 4) {
     benchmark<4, KeyType>(num_items);

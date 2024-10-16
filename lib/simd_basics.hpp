@@ -3,7 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
-constexpr auto L2_CACHE_SIZE = 256 * 1024;
+#ifndef L2_CACHE_SIZE
+#define L2_CACHE_SIZE 262144  // Default value in bytes
+#endif
 
 template <typename T>
 constexpr size_t block_size() {
