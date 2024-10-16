@@ -1,5 +1,3 @@
-#include <immintrin.h>
-
 #include <algorithm>
 #include <cassert>
 #include <chrono>
