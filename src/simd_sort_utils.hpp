@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "simd_basics.hpp"
-#include "simd_merge_utils.hpp"
+#include "two_way_merge.hpp"
 
 template <size_t elements_per_register, typename T>
 struct SortingNetwork {

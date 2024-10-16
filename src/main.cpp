@@ -50,8 +50,8 @@ int main() {
 
   constexpr auto SCALE = 200;
   constexpr auto ALIGNMENT = 32;
-  constexpr auto NUM_ITEMS = SCALE * block_size<KeyType>();
-  constexpr auto COUNT_PER_REGISTER = 4;  // 64-bit elements with AVX2.
+  constexpr auto NUM_ITEMS = SCALE * block_size<KeyType>();  //+ block_size<KeyType>() / 2;
+  constexpr auto COUNT_PER_REGISTER = 4;                     // 64-bit elements with AVX2.
 
   std::cout << "num_items: " << NUM_ITEMS << std::endl;
 
