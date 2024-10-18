@@ -97,7 +97,7 @@ def plot(l2_cache_size):
     ax1.plot(x_positions, throughput_simd_sort, color='black', marker='x', label='simd_sort')
     ax1.set_xticks(x_positions)  # Set x-ticks to evenly spaced positions
     ax1.set_xticklabels(df['scale'].astype(str))  # Set x-tick labels to actual scale values
-    ax1.set_xlabel('Scale')
+    ax1.set_xlabel('Number of tuples (in 2^20)')
     ax1.set_ylabel('Sort-throughput (M tuples/s)', color='black')
     ax1.tick_params(axis='y', labelcolor='black')
 
