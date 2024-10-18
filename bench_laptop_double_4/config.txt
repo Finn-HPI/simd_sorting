@@ -1,0 +1,9 @@
+Chosen configuration:
+Directory to create: bench_laptop_double_4_take2
+System: AVX2
+Element count per SIMD register: 4
+Element data type: double
+Number of warmup runs: 1
+Number of runs: 6
+L2 Cache Size: 256 KiB
+Build mode: Release
