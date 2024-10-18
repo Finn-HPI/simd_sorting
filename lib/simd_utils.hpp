@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #ifndef L2_CACHE_SIZE
-#define L2_CACHE_SIZE 262144  // Default value in bytes
+#define L2_CACHE_SIZE 262144  // Default value (256KiB)
 #endif
 
 template <typename T>
