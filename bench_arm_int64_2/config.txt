@@ -1,9 +1,0 @@
-Chosen configuration:
-Directory to create: bench_arm_int64_2
-System: Gracehopper
-Element count per SIMD register: 2
-Element data type: int64_t
-Number of warmup runs: 1
-Number of runs: 4
-L2 Cache Size: 1024 KiB
-Build mode: Release
