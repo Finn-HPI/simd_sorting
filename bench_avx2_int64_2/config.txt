@@ -1,0 +1,9 @@
+Chosen configuration:
+Directory to create: bench_avx2_int64_2
+System: AVX2
+Element count per SIMD register: 2
+Element data type: int64_t
+Number of warmup runs: 1
+Number of runs: 4
+L2 Cache Size: 512 KiB
+Build mode: Release
