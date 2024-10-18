@@ -1,0 +1,10 @@
+.cache/
+.clang-format
+.clang-tidy
+build*/
+.clangd
+
+bench*/*
+!bench*/config.txt
+!bench*/result.csv
+!bench*/*.png
