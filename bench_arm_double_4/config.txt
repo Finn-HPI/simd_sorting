@@ -1,8 +1,8 @@
 Chosen configuration:
-Directory to create: bench_power10_int64_4
-System: Power10
+Directory to create: bench_arm_double_4
+System: Gracehopper
 Element count per SIMD register: 4
-Element data type: int64_t
+Element data type: double
 Number of warmup runs: 1
 Number of runs: 4
 L2 Cache Size: 1024 KiB

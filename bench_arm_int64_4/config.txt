@@ -1,7 +1,7 @@
 Chosen configuration:
-Directory to create: bench_power10_int64_2
-System: Power10
-Element count per SIMD register: 2
+Directory to create: bench_arm_int64_4
+System: Gracehopper
+Element count per SIMD register: 4
 Element data type: int64_t
 Number of warmup runs: 1
 Number of runs: 4

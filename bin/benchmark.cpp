@@ -52,6 +52,7 @@ void benchmark(const size_t scale, const size_t num_warumup_runs, const size_t n
   for (auto& val : data) {
     val = dis(gen);
   }
+  std::cout << "start execution" << std::endl;
   assert(!std::ranges::is_sorted(data));
 
   std::vector<uint64_t> runtimes_std_sort;
