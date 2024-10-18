@@ -1,7 +1,7 @@
 .cache/
 .clang-format
 .clang-tidy
-build*/
+*build*/
 .clangd
 
 bench*/*
