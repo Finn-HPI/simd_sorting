@@ -5,39 +5,12 @@
 #include <fstream>
 #include <iostream>
 #include <random>
-#include <utility>
+
+#include <boost/align/aligned_allocator.hpp>
 
 #include "cxxopts.hpp"
 
 #include "simd_local_sort.hpp"
-
-template <typename T>
-struct AlignedAllocater {
-  using value_type = T;
-
-  explicit AlignedAllocater(std::size_t alignment) : _alignment(alignment) {}
-
-  T* allocate(std::size_t size) {
-    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-    void* memory_start_address = std::aligned_alloc(_alignment, size * sizeof(T));
-    if (!memory_start_address) {
-      throw std::bad_alloc();
-    }
-    return static_cast<T*>(memory_start_address);
-  }
-
-  void deallocate(T* pointer, std::size_t /*size*/) noexcept {
-    std::free(pointer);
-  }
-
- private:
-  std::size_t _alignment;
-};
-
-template <typename T>
-std::vector<T, AlignedAllocater<T>> create_aligned_vector(size_t count, size_t alignment) {
-  return std::move(std::vector<T, AlignedAllocater<T>>(count, AlignedAllocater<T>(alignment)));
-}
 
 template <typename T>
 auto get_uniform_distribution(T min, T max) {
@@ -50,12 +23,17 @@ auto get_uniform_distribution(T min, T max) {
   }
 }
 
+template <class T, std::size_t alignment = 1>
+using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, alignment>>;
+
 template <size_t count_per_register, typename KeyType>
 void benchmark(const size_t scale, const size_t num_warumup_runs, const size_t num_runs, std::ofstream& out) {
   using std::chrono::duration;
   using std::chrono::duration_cast;
   using std::chrono::high_resolution_clock;
   using std::chrono::milliseconds;
+
+  std::cout << "Running benchmark for scale: " << scale << " ..." << std::endl;
 
   std::random_device rnd;
   std::mt19937 gen(rnd());
@@ -66,10 +44,10 @@ void benchmark(const size_t scale, const size_t num_warumup_runs, const size_t n
   const auto base_num_items = 1'048'576;  // 2^20
   const auto num_items = base_num_items * scale;
 
-  auto data = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
-  auto data_std_sort = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
-  auto data_simd_sort = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
-  auto output_simd_sort = create_aligned_vector<KeyType>(num_items, ALIGNMENT);
+  auto data = aligned_vector<KeyType, ALIGNMENT>(num_items);
+  auto data_std_sort = aligned_vector<KeyType, ALIGNMENT>(num_items);
+  auto data_simd_sort = aligned_vector<KeyType, ALIGNMENT>(num_items);
+  auto output_simd_sort = aligned_vector<KeyType, ALIGNMENT>(num_items);
 
   for (auto& val : data) {
     val = dis(gen);
@@ -84,7 +62,6 @@ void benchmark(const size_t scale, const size_t num_warumup_runs, const size_t n
   auto* input_ptr = data_simd_sort.data();
   auto* output_ptr = output_simd_sort.data();
 
-  std::cout << "Running benchmark for scale: " << scale << " ..." << std::endl;
   const auto num_total_runs = num_warumup_runs + num_runs;
   for (size_t run_index = 0; run_index < num_total_runs; ++run_index) {
     // data_std_sort.clear();
